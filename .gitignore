@@ -1,0 +1,29 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+.env
+.env.local
+.env.*.local
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+vite.config.ts.timestamp-*
+
+# TypeScript incremental build output
+*.tsbuildinfo
+
+# Playwright artifacts
+/playwright-report/
+/test-results/
+/coverage/
