@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+region                    = "us-east-1"
+environment               = "production"
+ecs_cluster_name          = "platform-prod"
+vpc_id                    = "vpc-0123456789abcdef0"
+private_subnet_ids        = ["subnet-aaa", "subnet-bbb", "subnet-ccc"]
+alb_listener_arn          = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/internal/abc/def"
+host_header               = "admin.example.internal"
+image_tag                 = "latest"
+
+# Optional — leave blank to disable Sentry / audit sink.
+sentry_dsn_secret_arn     = ""
+audit_sink_url_secret_arn = ""

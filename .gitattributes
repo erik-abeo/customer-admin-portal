@@ -1,0 +1,39 @@
+* text=auto eol=lf
+
+# Explicit text types so Windows checkouts don't surprise anyone.
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.cjs       text eol=lf
+*.mjs       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.sh        text eol=lf
+*.tf        text eol=lf
+*.tfvars    text eol=lf
+*.conf      text eol=lf
+Dockerfile  text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+.editorconfig  text eol=lf
+.nvmrc         text eol=lf
+.env*          text eol=lf
+
+# Windows-only files keep CRLF.
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# Treat known binaries as binary so Git doesn't munge them.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary

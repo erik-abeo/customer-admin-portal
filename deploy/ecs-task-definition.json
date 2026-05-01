@@ -1,0 +1,83 @@
+{
+  "$comment": [
+    "ECS Fargate task definition for the Customer Admin Portal.",
+    "Replace the values surrounded by <ANGLE_BRACKETS> for your account / region.",
+    "",
+    "Deploy with:",
+    "  aws ecs register-task-definition --cli-input-json file://deploy/ecs-task-definition.json",
+    "",
+    "Then create / update a service that uses this task definition behind an",
+    "ALB target group on port 8080. The container is ROOTLESS (uid 101) and",
+    "listens on 8080 — no need for awsvpc port mappings to 80/443.",
+    "",
+    "Sensitive runtime values (Sentry DSN, audit-sink URL) are pulled from",
+    "AWS Secrets Manager via the secrets[] block; the Vite static bundle",
+    "doesn't see them at build time. To make these reach the SPA, you need",
+    "an entrypoint script that writes a /usr/share/nginx/html/config.json",
+    "from the env vars; the SPA reads that on boot."
+  ],
+  "family": "customer-admin-portal",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/customer-admin-portal-task",
+  "containerDefinitions": [
+    {
+      "name": "web",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/customer-admin-portal:<IMAGE_TAG>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp",
+          "appProtocol": "http"
+        }
+      ],
+      "readonlyRootFilesystem": false,
+      "user": "101",
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "TZ", "value": "UTC" }
+      ],
+      "secrets": [
+        {
+          "name": "VITE_SENTRY_DSN",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:cap/sentry-dsn"
+        },
+        {
+          "name": "VITE_AUDIT_SINK_URL",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:cap/audit-sink-url"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/customer-admin-portal",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "web",
+          "awslogs-create-group": "true"
+        }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      },
+      "ulimits": [{ "name": "nofile", "softLimit": 65535, "hardLimit": 65535 }]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.git
+.github
+*.log
+.env
+.env.*
+!.env.example
+.vscode
+.idea
+.DS_Store
+README.md
+LICENSE

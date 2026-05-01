@@ -1,0 +1,91 @@
+# Dependabot configuration for customer-admin-portal.
+#
+# We get weekly groups of updates so reviews stay manageable. Major
+# bumps are split out separately so they get the scrutiny they deserve.
+
+version: 2
+updates:
+  # ----- npm dependencies -----
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 8
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+    groups:
+      mantine:
+        patterns:
+          - "@mantine/*"
+      tabler:
+        patterns:
+          - "@tabler/*"
+      tanstack:
+        patterns:
+          - "@tanstack/*"
+      sentry:
+        patterns:
+          - "@sentry/*"
+      testing:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@testing-library/*"
+          - "happy-dom"
+          - "@playwright/*"
+          - "@axe-core/*"
+      lint-format:
+        patterns:
+          - "eslint*"
+          - "@typescript-eslint/*"
+          - "prettier*"
+      build-tooling:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "typescript"
+          - "@types/*"
+    # Keep major bumps as their own PRs so they get a real review.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ----- GitHub Actions -----
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 4
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # ----- Docker base images -----
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "docker"
+      include: "scope"
