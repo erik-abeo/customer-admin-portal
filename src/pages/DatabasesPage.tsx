@@ -22,13 +22,16 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { DatabaseInfoItem } from "@/api/types";
 import { RequireRole } from "@/auth/RequireRole";
+import { ListPagination } from "@/components/common/ListPagination";
+import { ListToolbar } from "@/components/common/ListToolbar";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
+import { SortableHeader } from "@/components/common/SortableHeader";
 import { features } from "@/config/env";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { DatabaseForm } from "@/features/databases/DatabaseForm";
@@ -38,7 +41,17 @@ import {
   useDeleteDatabase,
   useUpdateDatabase,
 } from "@/features/databases/queries";
+import { downloadCsv, toCsv } from "@/lib/csv";
+import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
+
+type SortKey = "name" | "server" | "cpmId";
+
+const SEARCHABLE = [
+  (d: DatabaseInfoItem) => d.DatabaseName,
+  (d: DatabaseInfoItem) => d.Description,
+  (d: DatabaseInfoItem) => d.CrystalPmId,
+] as const;
 
 export function DatabasesPage() {
   const dbs = useDatabases();
@@ -46,6 +59,60 @@ export function DatabasesPage() {
   const create = useCreateDatabase();
   const update = useUpdateDatabase();
   const remove = useDeleteDatabase();
+
+  const [createOpened, createCtl] = useDisclosure(false);
+  const [editTarget, setEditTarget] = useState<DatabaseInfoItem | null>(null);
+  const [serverFilter, setServerFilter] = useState<string | null>(null);
+
+  const serverNameById = useMemo(
+    () =>
+      Object.fromEntries(
+        (servers.data ?? []).map((s) => [s.Id, s.Name] as const),
+      ) as Record<number, string>,
+    [servers.data],
+  );
+
+  // Sort by server uses the resolved server name so the visible column
+  // order matches what the user sees, not the raw server ID.
+  const sortKeys = useMemo(
+    () => ({
+      name: (d: DatabaseInfoItem) => d.DatabaseName,
+      server: (d: DatabaseInfoItem) =>
+        serverNameById[d.DatabaseServerId] ?? `#${d.DatabaseServerId}`,
+      cpmId: (d: DatabaseInfoItem) => d.CrystalPmId,
+    }),
+    [serverNameById],
+  );
+
+  const filterPredicate = useCallback(
+    (d: DatabaseInfoItem) =>
+      !serverFilter || String(d.DatabaseServerId) === serverFilter,
+    [serverFilter],
+  );
+
+  const table = useListTable<DatabaseInfoItem, SortKey>({
+    data: dbs.data,
+    searchableFields: SEARCHABLE,
+    filter: filterPredicate,
+    sortKeys,
+    defaultSort: { key: "name", dir: "asc" },
+    defaultPageSize: 25,
+  });
+
+  const exportCsv = useCallback(() => {
+    const csv = toCsv(
+      ["Id", "Database name", "Server", "CrystalPM ID", "Description"],
+      table.filteredRows.map((d) => [
+        d.Id,
+        d.DatabaseName,
+        serverNameById[d.DatabaseServerId] ?? `#${d.DatabaseServerId}`,
+        d.CrystalPmId,
+        d.Description ?? "",
+      ]),
+    );
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadCsv(`databases-${stamp}.csv`, csv);
+  }, [table.filteredRows, serverNameById]);
 
   const confirmDelete = (db: DatabaseInfoItem) => {
     modals.openConfirmModal({
@@ -70,24 +137,6 @@ export function DatabasesPage() {
     });
   };
 
-  const [createOpened, createCtl] = useDisclosure(false);
-  const [editTarget, setEditTarget] = useState<DatabaseInfoItem | null>(null);
-  const [serverFilter, setServerFilter] = useState<string | null>(null);
-
-  const serverNameById = useMemo(
-    () =>
-      Object.fromEntries(
-        (servers.data ?? []).map((s) => [s.Id, s.Name] as const),
-      ) as Record<number, string>,
-    [servers.data],
-  );
-
-  const filteredRows = useMemo(() => {
-    const all = dbs.data ?? [];
-    if (!serverFilter) return all;
-    return all.filter((d) => String(d.DatabaseServerId) === serverFilter);
-  }, [dbs.data, serverFilter]);
-
   return (
     <Container size="xl" py="lg" className="app-fade-in">
       <PageHeader
@@ -96,18 +145,6 @@ export function DatabasesPage() {
         description="Customer databases hosted on registered MariaDB servers."
         actions={
           <>
-            <Select
-              placeholder="Filter by server…"
-              data={(servers.data ?? []).map((s) => ({
-                value: String(s.Id),
-                label: s.Name,
-              }))}
-              value={serverFilter}
-              onChange={setServerFilter}
-              clearable
-              searchable
-              w={240}
-            />
             <Tooltip label="Refresh">
               <ActionIcon
                 variant="default"
@@ -133,6 +170,31 @@ export function DatabasesPage() {
       />
 
       <Stack gap="md">
+        <ListToolbar
+          search={table.search}
+          onSearchChange={table.setSearch}
+          searchPlaceholder="Database name, description, CPM ID…"
+          totalCount={table.totalCount}
+          filteredCount={table.filteredCount}
+          onExport={exportCsv}
+          exportDisabled={table.filteredCount === 0}
+          extraFilters={
+            <Select
+              label="Server"
+              placeholder="All servers"
+              data={(servers.data ?? []).map((s) => ({
+                value: String(s.Id),
+                label: s.Name,
+              }))}
+              value={serverFilter}
+              onChange={setServerFilter}
+              clearable
+              searchable
+              w={240}
+            />
+          }
+        />
+
         <QueryStatus
           isLoading={dbs.isLoading || servers.isLoading}
           error={dbs.error ?? servers.error}
@@ -140,20 +202,25 @@ export function DatabasesPage() {
             void dbs.refetch();
             void servers.refetch();
           }}
-          loadingSkeleton={{ rows: 6, columns: 5 }}
-          isEmpty={filteredRows.length === 0}
+          loadingSkeleton={{
+            rows: 8,
+            columnWidths: ["32%", "28%", "20%", "60%", "60px"],
+          }}
+          isEmpty={table.filteredCount === 0}
           emptyMessage={
-            serverFilter
-              ? "No databases on the selected server"
-              : "No databases registered yet"
+            table.totalCount === 0
+              ? "No databases registered yet"
+              : serverFilter
+                ? "No databases on the selected server"
+                : "No databases match the current filters"
           }
           emptyDescription={
-            serverFilter
-              ? "Try clearing the filter or pick another server."
-              : "Create the first customer database against a registered server."
+            table.totalCount === 0
+              ? "Create the first customer database against a registered server."
+              : "Try clearing the filters or pick another server."
           }
           emptyAction={
-            !serverFilter && (servers.data ?? []).length > 0 ? (
+            table.totalCount === 0 && (servers.data ?? []).length > 0 ? (
               <RequireRole role="admin">
                 <Button leftSection={<IconPlus size={16} />} onClick={createCtl.open}>
                   Add your first database
@@ -167,15 +234,33 @@ export function DatabasesPage() {
               <Table>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>Name</Table.Th>
-                    <Table.Th>Server</Table.Th>
-                    <Table.Th>CrystalPM ID</Table.Th>
+                    <SortableHeader
+                      sortKey="name"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Name
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="server"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Server
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="cpmId"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      CrystalPM ID
+                    </SortableHeader>
                     <Table.Th>Description</Table.Th>
                     <Table.Th style={{ width: 110 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {filteredRows.map((d) => (
+                  {table.rows.map((d) => (
                     <Table.Tr key={d.Id}>
                       <Table.Td>
                         <Anchor
@@ -250,6 +335,15 @@ export function DatabasesPage() {
             </Table.ScrollContainer>
           </Card>
         </QueryStatus>
+
+        <ListPagination
+          page={table.page}
+          pageCount={table.pageCount}
+          pageSize={table.pageSize}
+          filteredCount={table.filteredCount}
+          onPageChange={table.setPage}
+          onPageSizeChange={table.setPageSize}
+        />
       </Stack>
 
       <Modal

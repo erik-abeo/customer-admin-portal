@@ -64,6 +64,34 @@ body {
   }
 }
 
+/* Skip-to-content link — visually hidden until focused, then anchors to
+   the top-left of the viewport with high contrast and clear focus ring.
+   Required for WCAG 2.4.1 (Bypass Blocks). */
+.skip-to-content {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2000;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--mantine-color-crystal-6);
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+  /* Visually hide until focused — clip-path is preferred over `display:none`
+     because hidden elements are skipped by tab navigation, defeating the
+     purpose of a skip link. */
+  transform: translateY(calc(-100% - 16px));
+  transition: transform 120ms ease;
+}
+.skip-to-content:focus,
+.skip-to-content:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--mantine-color-yellow-4);
+  outline-offset: 2px;
+}
+
 /* The login page background and decorative orbs. Defined here so the
    markup stays semantic and the styles ride the color-scheme media query. */
 .login-shell {
@@ -271,8 +299,26 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* Honor the OS-level "reduce motion" preference across the board.
+     We collapse durations to a near-zero "snap" rather than 0 so very
+     short transitions still trigger their `transitionend` listeners
+     (some Mantine components rely on these for menu close timing). */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .spin {
     animation: none;
+  }
+  .app-fade-in {
+    animation: none;
+  }
+  .skip-to-content {
+    transition: none;
   }
 }
 

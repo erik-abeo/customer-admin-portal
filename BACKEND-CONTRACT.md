@@ -163,5 +163,5 @@ the SPA's `httpClient`.
 - Adding new optional fields to existing DTOs is non-breaking; the SPA's
   type definitions accept and ignore unknown properties.
 - Renaming, removing, or changing the type of an existing field is
-  breaking. Coordinate via this document and the
-  [`CHANGELOG.md`](./CHANGELOG.md).
+  breaking. Coordinate via this document and a release note in the
+  associated PR.

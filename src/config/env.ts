@@ -30,6 +30,20 @@ function optional(value: string | undefined): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed;
 }
 
+function intInRange(
+  raw: string | undefined,
+  defaultValue: number,
+  min: number,
+  max: number,
+): number {
+  if (raw === undefined) return defaultValue;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return defaultValue;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
 /**
  * Feature flags are deliberately *opt-in*. Until backend support lands or
  * an operator explicitly enables them, the corresponding UI surfaces stay
@@ -58,5 +72,23 @@ export const env = {
   environment: optional(import.meta.env.VITE_ENVIRONMENT) ?? "development",
   /** Optional URL of the audit-log POST sink. Used only when features.auditSink is true. */
   auditSinkUrl: optional(import.meta.env.VITE_AUDIT_SINK_URL),
+  /**
+   * Idle inactivity threshold (minutes). After this much inactivity the
+   * portal force-signs the operator out. Set `VITE_IDLE_TIMEOUT_MINUTES=0`
+   * to disable. Default is 30 — generous enough for paperwork workflows
+   * but tight enough to satisfy basic security review.
+   */
+  idleTimeoutMinutes: intInRange(
+    import.meta.env.VITE_IDLE_TIMEOUT_MINUTES,
+    30,
+    0,
+    24 * 60,
+  ),
+  /**
+   * Warning window (minutes) before the hard idle sign-out. Default is 1
+   * minute — long enough to give the user a chance to react, short enough
+   * not to feel aggressive when they walk away.
+   */
+  idleWarnMinutes: intInRange(import.meta.env.VITE_IDLE_WARN_MINUTES, 1, 0, 30),
   features,
 } as const;

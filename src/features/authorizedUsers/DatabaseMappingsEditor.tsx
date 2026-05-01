@@ -67,9 +67,9 @@ export function DatabaseMappingsEditor({
         const dbs = dbsByServer.get(server.Id) ?? [];
         return (
           <Stack key={server.Id} gap="xs">
-            <Title order={6}>
+            <Title order={3} fz="sm" fw={600}>
               {server.Name}{" "}
-              <Text span size="xs" c="dimmed">
+              <Text span size="xs" c="dimmed" fw={400}>
                 ({server.LocalServerAddress}:{server.ServerPort})
               </Text>
             </Title>

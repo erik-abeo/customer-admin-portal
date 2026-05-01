@@ -19,13 +19,16 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { DatabaseServerInfoItem } from "@/api/types";
 import { RequireRole } from "@/auth/RequireRole";
+import { ListPagination } from "@/components/common/ListPagination";
+import { ListToolbar } from "@/components/common/ListToolbar";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
+import { SortableHeader } from "@/components/common/SortableHeader";
 import { features } from "@/config/env";
 import { DatabaseServerForm } from "@/features/databaseServers/DatabaseServerForm";
 import {
@@ -34,7 +37,25 @@ import {
   useDeleteDatabaseServer,
   useUpdateDatabaseServer,
 } from "@/features/databaseServers/queries";
+import { downloadCsv, toCsv } from "@/lib/csv";
+import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
+
+type SortKey = "name" | "local" | "remote" | "port";
+
+const SORT_KEYS = {
+  name: (s: DatabaseServerInfoItem) => s.Name,
+  local: (s: DatabaseServerInfoItem) => s.LocalServerAddress,
+  remote: (s: DatabaseServerInfoItem) => s.RemoteServerAddress,
+  port: (s: DatabaseServerInfoItem) => s.ServerPort,
+} as const;
+
+const SEARCHABLE = [
+  (s: DatabaseServerInfoItem) => s.Name,
+  (s: DatabaseServerInfoItem) => s.LocalServerAddress,
+  (s: DatabaseServerInfoItem) => s.RemoteServerAddress,
+  (s: DatabaseServerInfoItem) => s.Description,
+] as const;
 
 export function DatabaseServersPage() {
   const navigate = useNavigate();
@@ -42,6 +63,30 @@ export function DatabaseServersPage() {
   const create = useCreateDatabaseServer();
   const update = useUpdateDatabaseServer();
   const remove = useDeleteDatabaseServer();
+
+  const table = useListTable<DatabaseServerInfoItem, SortKey>({
+    data,
+    searchableFields: SEARCHABLE,
+    sortKeys: SORT_KEYS,
+    defaultSort: { key: "name", dir: "asc" },
+    defaultPageSize: 25,
+  });
+
+  const exportCsv = useCallback(() => {
+    const csv = toCsv(
+      ["Id", "Name", "Local address", "Remote address", "Port", "Description"],
+      table.filteredRows.map((s) => [
+        s.Id,
+        s.Name,
+        s.LocalServerAddress,
+        s.RemoteServerAddress ?? "",
+        s.ServerPort,
+        s.Description ?? "",
+      ]),
+    );
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadCsv(`database-servers-${stamp}.csv`, csv);
+  }, [table.filteredRows]);
 
   const confirmDelete = (server: DatabaseServerInfoItem) => {
     modals.openConfirmModal({
@@ -68,8 +113,6 @@ export function DatabaseServersPage() {
 
   const [createOpened, createCtl] = useDisclosure(false);
   const [editTarget, setEditTarget] = useState<DatabaseServerInfoItem | null>(null);
-
-  const rows = data ?? [];
 
   return (
     <Container size="xl" py="lg" className="app-fade-in">
@@ -100,20 +143,43 @@ export function DatabaseServersPage() {
       />
 
       <Stack gap="md">
+        <ListToolbar
+          search={table.search}
+          onSearchChange={table.setSearch}
+          searchPlaceholder="Name, address, description…"
+          totalCount={table.totalCount}
+          filteredCount={table.filteredCount}
+          onExport={exportCsv}
+          exportDisabled={table.filteredCount === 0}
+        />
+
         <QueryStatus
           isLoading={isLoading}
           error={error}
           onRetry={() => void refetch()}
-          loadingSkeleton={{ rows: 6, columns: 6 }}
-          isEmpty={rows.length === 0}
-          emptyMessage="No database servers registered yet"
-          emptyDescription="Register a MariaDB instance to start onboarding customer databases."
+          loadingSkeleton={{
+            rows: 8,
+            columnWidths: ["28%", "32%", "32%", "8%", "40%", "60px"],
+          }}
+          isEmpty={table.filteredCount === 0}
+          emptyMessage={
+            table.totalCount === 0
+              ? "No database servers registered yet"
+              : "No servers match the current filters"
+          }
+          emptyDescription={
+            table.totalCount === 0
+              ? "Register a MariaDB instance to start onboarding customer databases."
+              : "Try adjusting the search above."
+          }
           emptyAction={
-            <RequireRole role="admin">
-              <Button leftSection={<IconPlus size={16} />} onClick={createCtl.open}>
-                Add your first server
-              </Button>
-            </RequireRole>
+            table.totalCount === 0 ? (
+              <RequireRole role="admin">
+                <Button leftSection={<IconPlus size={16} />} onClick={createCtl.open}>
+                  Add your first server
+                </Button>
+              </RequireRole>
+            ) : undefined
           }
         >
           <Card padding={0}>
@@ -121,16 +187,40 @@ export function DatabaseServersPage() {
               <Table>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>Name</Table.Th>
-                    <Table.Th>Local address</Table.Th>
-                    <Table.Th>Remote address</Table.Th>
-                    <Table.Th>Port</Table.Th>
+                    <SortableHeader
+                      sortKey="name"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Name
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="local"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Local address
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="remote"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Remote address
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="port"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Port
+                    </SortableHeader>
                     <Table.Th>Description</Table.Th>
                     <Table.Th style={{ width: 110 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {rows.map((s) => (
+                  {table.rows.map((s) => (
                     <Table.Tr key={s.Id}>
                       <Table.Td>{s.Name}</Table.Td>
                       <Table.Td>
@@ -202,6 +292,15 @@ export function DatabaseServersPage() {
             </Table.ScrollContainer>
           </Card>
         </QueryStatus>
+
+        <ListPagination
+          page={table.page}
+          pageCount={table.pageCount}
+          pageSize={table.pageSize}
+          filteredCount={table.filteredCount}
+          onPageChange={table.setPage}
+          onPageSizeChange={table.setPageSize}
+        />
       </Stack>
 
       <Modal

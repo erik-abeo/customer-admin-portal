@@ -130,7 +130,9 @@ export function PrivilegesEditor({
         return (
           <Paper key={entry.ServerId} withBorder p="sm" radius="md">
             <Group justify="space-between" mb="xs">
-              <Title order={6}>{server?.Name ?? `Server #${entry.ServerId}`}</Title>
+              <Title order={3} fz="sm" fw={600}>
+                {server?.Name ?? `Server #${entry.ServerId}`}
+              </Title>
               <ActionIcon
                 variant="subtle"
                 color="red"

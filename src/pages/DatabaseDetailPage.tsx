@@ -126,7 +126,7 @@ export function DatabaseDetailPage() {
 
         <Group justify="space-between" align="flex-end">
           <Stack gap={2}>
-            <Title order={3} style={{ fontSize: 18 }}>
+            <Title order={2} style={{ fontSize: 18 }}>
               Authorized users
             </Title>
             <Text size="sm" c="dimmed">

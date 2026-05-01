@@ -3,7 +3,7 @@
  *
  * Sentry is activated only when `VITE_SENTRY_DSN` is set; otherwise this
  * module is a no-op (still safe to call `initSentry()`). Source maps are
- * uploaded as a separate CI step (see CHANGELOG and infra/ scripts).
+ * uploaded as a separate CI step (see `infra/` scripts).
  *
  * Why opt-in: development and CI runs should never spam your Sentry
  * project, and we don't want to ship a hardcoded DSN inside the

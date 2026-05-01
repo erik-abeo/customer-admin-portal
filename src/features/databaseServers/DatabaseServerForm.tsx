@@ -27,6 +27,14 @@ import type {
   UpdateDatabaseServerInfoRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import {
+  composeValidators,
+  hostname,
+  maxLength,
+  port,
+  required,
+  strongPassword,
+} from "@/lib/validators";
 
 export interface DatabaseServerFormValues {
   Name: string;
@@ -70,14 +78,23 @@ export function DatabaseServerForm({
 
   const form = useForm<DatabaseServerFormValues>({
     initialValues: emptyValues(initial),
+    validateInputOnBlur: true,
     validate: {
-      Name: (v) => (v.trim().length === 0 ? "Name is required" : null),
-      LocalServerAddress: (v) =>
-        v.trim().length === 0 ? "Local server address is required" : null,
-      ServerPort: (v) =>
-        v < 1 || v > 65535 ? "Port must be between 1 and 65535" : null,
+      Name: composeValidators(required("Name"), maxLength(64, "Name")),
+      Description: maxLength(500, "Description"),
+      LocalServerAddress: composeValidators(
+        required("Local server address"),
+        hostname("Local server address"),
+      ),
+      RemoteServerAddress: hostname("Remote server address"),
+      ServerPort: port("Server port"),
       RootUserPassword: (v) => {
-        if (!isEdit && v.length === 0) return "Root password is required";
+        if (!isEdit) {
+          if (v.length === 0) return "Root password is required";
+          return strongPassword("Root password")(v);
+        }
+        // Edit mode: empty means "keep existing"; only validate when set.
+        if (v.length > 0) return strongPassword("Root password")(v);
         return null;
       },
     },

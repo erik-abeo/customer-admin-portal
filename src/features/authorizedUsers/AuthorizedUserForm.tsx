@@ -19,6 +19,13 @@ import type {
   UpdateUserRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import {
+  composeValidators,
+  email,
+  hostname,
+  required,
+  strongPassword,
+} from "@/lib/validators";
 
 import { DatabaseMappingsEditor } from "./DatabaseMappingsEditor";
 
@@ -40,8 +47,6 @@ interface AuthorizedUserFormProps {
   submitting?: boolean;
 }
 
-const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-
 export function AuthorizedUserForm({
   servers,
   databases,
@@ -61,16 +66,22 @@ export function AuthorizedUserForm({
       StaticHost: initial?.StaticHost ?? "",
       DatabaseMappings: initial?.DatabaseMappings ?? [],
     },
+    validateInputOnBlur: true,
     validate: {
-      Email: (v) => (isValidEmail(v) ? null : "Valid email is required"),
+      Email: composeValidators(required("Email"), email()),
       Password: (v) => {
-        if (isEdit) return null;
-        return v.length < 8 ? "Password must be at least 8 characters" : null;
+        if (isEdit) {
+          // Empty = keep existing; only validate when set.
+          return v.length > 0 ? strongPassword()(v) : null;
+        }
+        if (v.length === 0) return "Password is required";
+        return strongPassword()(v);
       },
-      StaticHost: (v, all) =>
-        all.UseStaticHost && v.trim().length === 0
-          ? "Static host is required when enabled"
-          : null,
+      StaticHost: (v, all) => {
+        if (!all.UseStaticHost) return null;
+        if (v.trim().length === 0) return "Static host is required when enabled";
+        return hostname("Static host")(v);
+      },
     },
   });
 
@@ -118,7 +129,7 @@ export function AuthorizedUserForm({
             description={
               isEdit
                 ? "Leave blank to keep the existing password."
-                : "Minimum 8 characters."
+                : "At least 8 characters mixing three of: lowercase, uppercase, digits, symbols."
             }
             required={!isEdit}
             autoComplete="new-password"

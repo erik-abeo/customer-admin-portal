@@ -248,7 +248,10 @@ function DumpsLive() {
             void servers.refetch();
             void databases.refetch();
           }}
-          loadingSkeleton={{ rows: 6, columns: 6 }}
+          loadingSkeleton={{
+            rows: 8,
+            columnWidths: ["24%", "24%", "12%", "20%", "40%", "60px"],
+          }}
           isEmpty={rows.length === 0}
           emptyMessage="No dumps registered yet"
           emptyDescription="Register a dump file or upload one to make it available for imports."

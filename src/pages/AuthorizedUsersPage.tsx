@@ -6,31 +6,25 @@ import {
   Container,
   Group,
   Modal,
-  Paper,
   SegmentedControl,
   Stack,
   Table,
   Text,
-  TextInput,
   Tooltip,
 } from "@mantine/core";
-import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
+import { useDisclosure } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
-import {
-  IconDownload,
-  IconEdit,
-  IconPlus,
-  IconRefresh,
-  IconSearch,
-  IconTrash,
-} from "@tabler/icons-react";
-import { useEffect, useMemo, useState } from "react";
+import { IconEdit, IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { AuthorizedUserInfoItem } from "@/api/types";
 import { RequireRole } from "@/auth/RequireRole";
+import { ListPagination } from "@/components/common/ListPagination";
+import { ListToolbar } from "@/components/common/ListToolbar";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
+import { SortableHeader } from "@/components/common/SortableHeader";
 import { AuthorizedUserForm } from "@/features/authorizedUsers/AuthorizedUserForm";
 import {
   useAuthorizedUsers,
@@ -41,7 +35,21 @@ import {
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { useDatabases } from "@/features/databases/queries";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
+
+type SortKey = "email" | "host" | "mappings";
+
+const SEARCHABLE = [
+  (u: AuthorizedUserInfoItem) => u.Email,
+  (u: AuthorizedUserInfoItem) => u.StaticHost,
+] as const;
+
+const SORT_KEYS = {
+  email: (u: AuthorizedUserInfoItem) => u.Email,
+  host: (u: AuthorizedUserInfoItem) => u.StaticHost,
+  mappings: (u: AuthorizedUserInfoItem) => u.DatabaseMappings?.length ?? 0,
+} as const;
 
 export function AuthorizedUsersPage() {
   const users = useAuthorizedUsers();
@@ -55,46 +63,47 @@ export function AuthorizedUsersPage() {
   const [editTarget, setEditTarget] = useState<AuthorizedUserInfoItem | null>(null);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const [search, setSearch] = useState(searchParams.get("email") ?? "");
-  const [debouncedSearch] = useDebouncedValue(search, 200);
   const [hostFilter, setHostFilter] = useState<"all" | "static" | "any">("all");
   const [accessFilter, setAccessFilter] = useState<"all" | "with" | "without">("all");
 
-  // Keep the URL in sync with the email search so deep links from the
-  // Database Detail page survive a refresh.
-  useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (debouncedSearch.trim().length > 0) {
-      next.set("email", debouncedSearch.trim());
-    } else {
-      next.delete("email");
-    }
-    if (next.toString() !== searchParams.toString()) {
-      setSearchParams(next, { replace: true });
-    }
-  }, [debouncedSearch, searchParams, setSearchParams]);
-
-  const filteredRows = useMemo(() => {
-    const all = users.data ?? [];
-    const needle = debouncedSearch.trim().toLowerCase();
-    return all.filter((u) => {
-      if (needle) {
-        const haystack = `${u.Email} ${u.StaticHost ?? ""}`.toLowerCase();
-        if (!haystack.includes(needle)) return false;
-      }
+  // Stable predicate so the hook's filter dependency doesn't churn each render.
+  const filterPredicate = useCallback(
+    (u: AuthorizedUserInfoItem) => {
       if (hostFilter === "static" && !u.UseStaticHost) return false;
       if (hostFilter === "any" && u.UseStaticHost) return false;
       const mappingCount = u.DatabaseMappings?.length ?? 0;
       if (accessFilter === "with" && mappingCount === 0) return false;
       if (accessFilter === "without" && mappingCount > 0) return false;
       return true;
-    });
-  }, [users.data, debouncedSearch, hostFilter, accessFilter]);
+    },
+    [hostFilter, accessFilter],
+  );
 
-  const rows = filteredRows;
-  const totalCount = users.data?.length ?? 0;
+  const table = useListTable<AuthorizedUserInfoItem, SortKey>({
+    data: users.data,
+    searchableFields: SEARCHABLE,
+    filter: filterPredicate,
+    sortKeys: SORT_KEYS,
+    defaultSort: { key: "email", dir: "asc" },
+    defaultPageSize: 25,
+    initialSearch: searchParams.get("email") ?? "",
+  });
 
-  const exportCsv = (entries: AuthorizedUserInfoItem[]) => {
+  // Keep the URL in sync with the email search so deep links from the
+  // Database Detail page survive a refresh.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (table.debouncedSearch.trim().length > 0) {
+      next.set("email", table.debouncedSearch.trim());
+    } else {
+      next.delete("email");
+    }
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [table.debouncedSearch, searchParams, setSearchParams]);
+
+  const exportCsv = useCallback(() => {
     const serverNameById = new Map(
       (servers.data ?? []).map((s) => [s.Id, s.Name] as const),
     );
@@ -110,7 +119,7 @@ export function AuthorizedUsersPage() {
         "Database access count",
         "Databases",
       ],
-      entries.map((u) => [
+      table.filteredRows.map((u) => [
         u.Id,
         u.Email,
         u.UseStaticHost ? "yes" : "no",
@@ -129,7 +138,7 @@ export function AuthorizedUsersPage() {
     );
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     downloadCsv(`authorized-users-${stamp}.csv`, csv);
-  };
+  }, [table.filteredRows, servers.data, databases.data]);
 
   const confirmDelete = (user: AuthorizedUserInfoItem) => {
     modals.openConfirmModal({
@@ -154,6 +163,44 @@ export function AuthorizedUsersPage() {
     });
   };
 
+  const extraFilters = useMemo(
+    () => (
+      <>
+        <Stack gap={4}>
+          <Text size="xs" fw={500}>
+            Host restriction
+          </Text>
+          <SegmentedControl
+            value={hostFilter}
+            onChange={(v) => setHostFilter(v as typeof hostFilter)}
+            data={[
+              { label: "All", value: "all" },
+              { label: "Static only", value: "static" },
+              { label: "Any host", value: "any" },
+            ]}
+            size="xs"
+          />
+        </Stack>
+        <Stack gap={4}>
+          <Text size="xs" fw={500}>
+            Database access
+          </Text>
+          <SegmentedControl
+            value={accessFilter}
+            onChange={(v) => setAccessFilter(v as typeof accessFilter)}
+            data={[
+              { label: "All", value: "all" },
+              { label: "With mappings", value: "with" },
+              { label: "Without", value: "without" },
+            ]}
+            size="xs"
+          />
+        </Stack>
+      </>
+    ),
+    [hostFilter, accessFilter],
+  );
+
   return (
     <Container size="xl" py="lg" className="app-fade-in">
       <PageHeader
@@ -173,14 +220,6 @@ export function AuthorizedUsersPage() {
                 <IconRefresh size={18} />
               </ActionIcon>
             </Tooltip>
-            <Button
-              variant="default"
-              leftSection={<IconDownload size={16} />}
-              onClick={() => exportCsv(rows)}
-              disabled={rows.length === 0}
-            >
-              Export CSV
-            </Button>
             <RequireRole role="admin">
               <Button leftSection={<IconPlus size={16} />} onClick={createCtl.open}>
                 Add user
@@ -191,51 +230,16 @@ export function AuthorizedUsersPage() {
       />
 
       <Stack gap="md">
-        <Paper p="md" withBorder>
-          <Group gap="md" align="flex-end" wrap="wrap">
-            <TextInput
-              label="Search"
-              placeholder="Email or static host…"
-              leftSection={<IconSearch size={14} />}
-              value={search}
-              onChange={(e) => setSearch(e.currentTarget.value)}
-              w={280}
-            />
-            <Stack gap={4}>
-              <Text size="xs" fw={500}>
-                Host restriction
-              </Text>
-              <SegmentedControl
-                value={hostFilter}
-                onChange={(v) => setHostFilter(v as typeof hostFilter)}
-                data={[
-                  { label: "All", value: "all" },
-                  { label: "Static only", value: "static" },
-                  { label: "Any host", value: "any" },
-                ]}
-                size="xs"
-              />
-            </Stack>
-            <Stack gap={4}>
-              <Text size="xs" fw={500}>
-                Database access
-              </Text>
-              <SegmentedControl
-                value={accessFilter}
-                onChange={(v) => setAccessFilter(v as typeof accessFilter)}
-                data={[
-                  { label: "All", value: "all" },
-                  { label: "With mappings", value: "with" },
-                  { label: "Without", value: "without" },
-                ]}
-                size="xs"
-              />
-            </Stack>
-            <Text size="xs" c="dimmed" ml="auto" fw={500}>
-              Showing {rows.length} of {totalCount}
-            </Text>
-          </Group>
-        </Paper>
+        <ListToolbar
+          search={table.search}
+          onSearchChange={table.setSearch}
+          searchPlaceholder="Email or static host…"
+          totalCount={table.totalCount}
+          filteredCount={table.filteredCount}
+          onExport={exportCsv}
+          exportDisabled={table.filteredCount === 0}
+          extraFilters={extraFilters}
+        />
 
         <QueryStatus
           isLoading={users.isLoading || servers.isLoading || databases.isLoading}
@@ -245,20 +249,23 @@ export function AuthorizedUsersPage() {
             void servers.refetch();
             void databases.refetch();
           }}
-          loadingSkeleton={{ rows: 8, columns: 4 }}
-          isEmpty={rows.length === 0}
+          loadingSkeleton={{
+            rows: 8,
+            columnWidths: ["48%", "32%", "10%", "60px"],
+          }}
+          isEmpty={table.filteredCount === 0}
           emptyMessage={
-            totalCount === 0
+            table.totalCount === 0
               ? "No authorized users yet"
               : "No users match the current filters"
           }
           emptyDescription={
-            totalCount === 0
+            table.totalCount === 0
               ? "Onboard the first customer login (Supertokens) and grant them database access."
               : "Try adjusting the search or the segmented filters above."
           }
           emptyAction={
-            totalCount === 0 ? (
+            table.totalCount === 0 ? (
               <RequireRole role="admin">
                 <Button leftSection={<IconPlus size={16} />} onClick={createCtl.open}>
                   Add your first user
@@ -272,14 +279,32 @@ export function AuthorizedUsersPage() {
               <Table>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>Email</Table.Th>
-                    <Table.Th>Static host</Table.Th>
-                    <Table.Th>Databases</Table.Th>
+                    <SortableHeader
+                      sortKey="email"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Email
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="host"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Static host
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="mappings"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Databases
+                    </SortableHeader>
                     <Table.Th style={{ width: 100 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {rows.map((u) => (
+                  {table.rows.map((u) => (
                     <Table.Tr key={u.Id}>
                       <Table.Td>{u.Email}</Table.Td>
                       <Table.Td>
@@ -337,6 +362,15 @@ export function AuthorizedUsersPage() {
             </Table.ScrollContainer>
           </Card>
         </QueryStatus>
+
+        <ListPagination
+          page={table.page}
+          pageCount={table.pageCount}
+          pageSize={table.pageSize}
+          filteredCount={table.filteredCount}
+          onPageChange={table.setPage}
+          onPageSizeChange={table.setPageSize}
+        />
       </Stack>
 
       <Modal

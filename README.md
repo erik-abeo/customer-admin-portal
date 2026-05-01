@@ -156,7 +156,6 @@ Dockerfile                  # Multi-stage build → nginx-unprivileged
 .editorconfig               # Whitespace / charset baseline for all editors
 .nvmrc                      # Pinned Node version
 LICENSE                     # Proprietary, internal-use-only license
-CHANGELOG.md                # Versioned change history (Keep a Changelog)
 ```
 
 ## API surface used

@@ -18,6 +18,7 @@ import type {
   UpdateDatabaseInfoRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import { composeValidators, identifier, maxLength, required } from "@/lib/validators";
 
 interface DatabaseFormValues {
   DatabaseServerId: number | null;
@@ -55,11 +56,22 @@ export function DatabaseForm({
       Description: initial?.Description ?? "",
       CrystalPmId: initial?.CrystalPmId ?? "",
     },
+    validateInputOnBlur: true,
     validate: {
       DatabaseServerId: (v) => (v == null ? "Server is required" : null),
-      DatabaseName: (v) => (v.trim().length === 0 ? "Database name is required" : null),
-      CrystalPmId: (v) =>
-        v === "" || Number.isNaN(Number(v)) ? "CrystalPM ID is required" : null,
+      DatabaseName: composeValidators(
+        required("Database name"),
+        identifier("Database name"),
+      ),
+      Description: maxLength(500, "Description"),
+      CrystalPmId: (v) => {
+        if (v === "" || v === null) return "CrystalPM ID is required";
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "CrystalPM ID must be a number";
+        if (!Number.isInteger(n)) return "CrystalPM ID must be a whole number";
+        if (n < 0) return "CrystalPM ID must be 0 or greater";
+        return null;
+      },
     },
   });
 

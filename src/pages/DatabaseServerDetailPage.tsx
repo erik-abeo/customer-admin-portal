@@ -146,7 +146,7 @@ export function DatabaseServerDetailPage() {
 
         <Group justify="space-between" align="flex-end">
           <Stack gap={2}>
-            <Title order={3} style={{ fontSize: 18 }}>
+            <Title order={2} style={{ fontSize: 18 }}>
               Databases on this server
             </Title>
             <Text size="sm" c="dimmed">

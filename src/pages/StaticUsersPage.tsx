@@ -24,7 +24,7 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { staticUsersApi } from "@/api/staticUsers";
 import type {
@@ -36,8 +36,11 @@ import type {
   UpdateStaticDatabaseUserResponse,
 } from "@/api/types";
 import { RequireRole } from "@/auth/RequireRole";
+import { ListPagination } from "@/components/common/ListPagination";
+import { ListToolbar } from "@/components/common/ListToolbar";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
+import { SortableHeader } from "@/components/common/SortableHeader";
 import { features } from "@/config/env";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { useDatabases } from "@/features/databases/queries";
@@ -48,6 +51,8 @@ import {
   useStaticUsers,
   useUpdateStaticUser,
 } from "@/features/staticUsers/queries";
+import { downloadCsv, toCsv } from "@/lib/csv";
+import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
 
 interface SecretReveal {
@@ -57,21 +62,20 @@ interface SecretReveal {
   servers?: { ServerId: number; Message?: string | null }[];
 }
 
+interface GroupedStaticUser {
+  userName: string;
+  description: string | null;
+  serverIds: number[];
+  ids: number[];
+  latestModifiedUtc: string;
+}
+
 /**
  * The list endpoint returns one row per (server, user). Group by username so
  * the UI shows one row per logical user with all servers on the right.
  */
-function groupByUserName(rows: GetStaticDatabaseUserResponse[]) {
-  const map = new Map<
-    string,
-    {
-      userName: string;
-      description: string | null;
-      serverIds: number[];
-      ids: number[];
-      latestModifiedUtc: string;
-    }
-  >();
+function groupByUserName(rows: GetStaticDatabaseUserResponse[]): GroupedStaticUser[] {
+  const map = new Map<string, GroupedStaticUser>();
   for (const r of rows) {
     const existing = map.get(r.UserName);
     if (existing) {
@@ -92,8 +96,21 @@ function groupByUserName(rows: GetStaticDatabaseUserResponse[]) {
       });
     }
   }
-  return Array.from(map.values()).sort((a, b) => a.userName.localeCompare(b.userName));
+  return Array.from(map.values());
 }
+
+type StaticUserSortKey = "userName" | "serverCount" | "lastModified";
+
+const SEARCHABLE = [
+  (g: GroupedStaticUser) => g.userName,
+  (g: GroupedStaticUser) => g.description,
+] as const;
+
+const SORT_KEYS = {
+  userName: (g: GroupedStaticUser) => g.userName,
+  serverCount: (g: GroupedStaticUser) => g.serverIds.length,
+  lastModified: (g: GroupedStaticUser) => g.latestModifiedUtc,
+} as const;
 
 export function StaticUsersPage() {
   const list = useStaticUsers();
@@ -143,6 +160,29 @@ export function StaticUsersPage() {
       ) as Record<number, string>,
     [servers.data],
   );
+
+  const table = useListTable<GroupedStaticUser, StaticUserSortKey>({
+    data: grouped,
+    searchableFields: SEARCHABLE,
+    sortKeys: SORT_KEYS,
+    defaultSort: { key: "userName", dir: "asc" },
+    defaultPageSize: 25,
+  });
+
+  const exportCsv = useCallback(() => {
+    const csv = toCsv(
+      ["Username", "Server count", "Servers", "Description", "Last modified (UTC)"],
+      table.filteredRows.map((g) => [
+        g.userName,
+        g.serverIds.length,
+        g.serverIds.map((id) => serverNameById[id] ?? `#${id}`).join("; "),
+        g.description ?? "",
+        g.latestModifiedUtc,
+      ]),
+    );
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadCsv(`static-users-${stamp}.csv`, csv);
+  }, [table.filteredRows, serverNameById]);
 
   const beginEdit = async (anyRowId: number) => {
     try {
@@ -199,6 +239,16 @@ export function StaticUsersPage() {
       />
 
       <Stack gap="md">
+        <ListToolbar
+          search={table.search}
+          onSearchChange={table.setSearch}
+          searchPlaceholder="Username or description…"
+          totalCount={table.totalCount}
+          filteredCount={table.filteredCount}
+          onExport={exportCsv}
+          exportDisabled={table.filteredCount === 0}
+        />
+
         <QueryStatus
           isLoading={list.isLoading || servers.isLoading || databases.isLoading}
           error={list.error ?? servers.error ?? databases.error}
@@ -207,12 +257,23 @@ export function StaticUsersPage() {
             void servers.refetch();
             void databases.refetch();
           }}
-          loadingSkeleton={{ rows: 6, columns: 5 }}
-          isEmpty={grouped.length === 0}
-          emptyMessage="No static database users yet"
-          emptyDescription="Provision the first long-lived service user with explicit per-database privileges."
+          loadingSkeleton={{
+            rows: 8,
+            columnWidths: ["32%", "40%", "50%", "32%", "60px"],
+          }}
+          isEmpty={table.filteredCount === 0}
+          emptyMessage={
+            table.totalCount === 0
+              ? "No static database users yet"
+              : "No users match the current filters"
+          }
+          emptyDescription={
+            table.totalCount === 0
+              ? "Provision the first long-lived service user with explicit per-database privileges."
+              : "Try adjusting the search above."
+          }
           emptyAction={
-            (servers.data ?? []).length > 0 ? (
+            table.totalCount === 0 && (servers.data ?? []).length > 0 ? (
               <RequireRole role="admin">
                 <Button leftSection={<IconPlus size={16} />} onClick={createCtl.open}>
                   Create your first static user
@@ -226,15 +287,33 @@ export function StaticUsersPage() {
               <Table>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>Username</Table.Th>
-                    <Table.Th>Servers</Table.Th>
+                    <SortableHeader
+                      sortKey="userName"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Username
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="serverCount"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Servers
+                    </SortableHeader>
                     <Table.Th>Description</Table.Th>
-                    <Table.Th>Last modified (UTC)</Table.Th>
+                    <SortableHeader
+                      sortKey="lastModified"
+                      sort={table.sort}
+                      onSortChange={table.setSort}
+                    >
+                      Last modified (UTC)
+                    </SortableHeader>
                     <Table.Th style={{ width: 110 }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {grouped.map((g) => (
+                  {table.rows.map((g) => (
                     <Table.Tr key={g.userName}>
                       <Table.Td>
                         <Text ff="monospace" size="sm">
@@ -300,6 +379,15 @@ export function StaticUsersPage() {
             </Table.ScrollContainer>
           </Card>
         </QueryStatus>
+
+        <ListPagination
+          page={table.page}
+          pageCount={table.pageCount}
+          pageSize={table.pageSize}
+          filteredCount={table.filteredCount}
+          onPageChange={table.setPage}
+          onPageSizeChange={table.setPageSize}
+        />
       </Stack>
 
       <Modal

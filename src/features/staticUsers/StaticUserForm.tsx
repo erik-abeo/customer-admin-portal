@@ -20,6 +20,7 @@ import type {
   UpdateStaticDatabaseUserRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import { maxLength, strongPassword } from "@/lib/validators";
 
 import { PrivilegesEditor } from "./PrivilegesEditor";
 
@@ -62,14 +63,21 @@ export function StaticUserForm({
       Description: initial?.Description ?? "",
       Servers: initialServers ?? [],
     },
+    validateInputOnBlur: true,
     validate: {
       UserPassword: (v, all) => {
         if (isEdit) return null;
         if (all.GenerateNewPassword) return null;
-        return v.length < 12
-          ? "Password must be at least 12 characters (or generate one)"
-          : null;
+        if (v.length < 12) {
+          return "Password must be at least 12 characters (or generate one)";
+        }
+        return strongPassword("Password")(v);
       },
+      Description: maxLength(500, "Description"),
+      Servers: (servers) =>
+        servers.length === 0
+          ? "Add at least one server with database privileges"
+          : null,
     },
   });
 

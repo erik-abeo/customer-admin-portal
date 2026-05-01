@@ -30,12 +30,22 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function scan(page: Page, contextLabel: string) {
   const builder = new AxeBuilder({ page })
-    .withTags(WCAG_TAGS)
-    // The dashboard's metric tiles render decorative icons inside Mantine's
-    // ThemeIcon — those are already handled by Mantine via aria-hidden, so
-    // axe occasionally double-reports them. We trust the per-component
-    // tests for this rule and silence it at the page level.
-    .disableRules(["color-contrast"]);
+    // We include `best-practice` so axe's heading-order rule fires on
+    // every page — the WCAG tags alone don't cover hierarchy regressions.
+    // We then disable the rules that are already handled elsewhere or
+    // that produce false positives against Mantine's components.
+    .withTags([...WCAG_TAGS, "best-practice"])
+    .disableRules([
+      // Color contrast is enforced by Lighthouse on the login page where
+      // the brand button is the canonical primary CTA. axe occasionally
+      // double-reports decorative tinted icons in the dashboard tiles.
+      "color-contrast",
+      // The login screen sits outside <main> intentionally; landmark
+      // assertions on every page would be redundant with the AppLayout
+      // tests.
+      "landmark-one-main",
+      "region",
+    ]);
 
   const results = await builder.analyze();
 

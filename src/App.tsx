@@ -19,6 +19,7 @@ import { addResponseListener } from "@/api/httpClient";
 import { AuthProvider } from "@/auth/AuthContext";
 import { useAuth } from "@/auth/authContextValue";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
+import { useIdleSignOut } from "@/auth/useIdleSignOut";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
 import { PageFallback } from "@/components/common/PageFallback";
@@ -184,6 +185,15 @@ function GlobalSignOutOn401() {
       unsubscribe();
     };
   }, [isAuthenticated, signOut]);
+
+  // Idle / inactivity auto sign-out. Only armed while authenticated so
+  // the login screen never gets booted.
+  useIdleSignOut({
+    enabled: isAuthenticated,
+    timeoutMinutes: env.idleTimeoutMinutes,
+    warnMinutes: env.idleWarnMinutes,
+    onSignOut: signOut,
+  });
 
   return null;
 }

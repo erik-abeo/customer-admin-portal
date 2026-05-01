@@ -24,7 +24,7 @@ export function NotFoundPage() {
           >
             404
           </Title>
-          <Title order={3}>Page not found</Title>
+          <Title order={2}>Page not found</Title>
           <Text c="dimmed" maw={420}>
             The page you tried to load doesn&apos;t exist in the portal. Check the URL
             or head back to the dashboard.

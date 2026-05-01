@@ -24,7 +24,7 @@ export function ErrorBoundary() {
   return (
     <Container size="sm" py="xl">
       <Stack gap="md">
-        <Title order={3}>Page failed to load</Title>
+        <Title order={1}>Page failed to load</Title>
         <Alert
           icon={<IconAlertTriangle size={18} />}
           title={title}

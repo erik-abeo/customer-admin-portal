@@ -15,6 +15,7 @@ import type {
   UpdateDumpRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import { composeValidators, maxLength, required } from "@/lib/validators";
 
 interface DumpFormProps {
   servers: DatabaseServerInfoItem[];
@@ -53,11 +54,13 @@ export function DumpForm({
       databaseServerId: initial ? String(initial.DatabaseServerId) : "",
       databaseId: initial ? String(initial.DatabaseId) : "",
     },
+    validateInputOnBlur: true,
     validate: {
-      name: (v) => (v.trim().length === 0 ? "Required" : null),
-      filePath: (v) => (v.trim().length === 0 ? "Required" : null),
-      databaseServerId: (v) => (v.trim().length === 0 ? "Required" : null),
-      databaseId: (v) => (v.trim().length === 0 ? "Required" : null),
+      name: composeValidators(required("Name"), maxLength(255, "Name")),
+      filePath: composeValidators(required("File path"), maxLength(1024, "File path")),
+      description: maxLength(500, "Description"),
+      databaseServerId: required("Database server"),
+      databaseId: required("Database"),
     },
   });
 

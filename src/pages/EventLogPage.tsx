@@ -329,7 +329,11 @@ function EventLogLive() {
           isLoading={query.isLoading}
           error={query.error}
           onRetry={() => void query.refetch()}
-          loadingSkeleton={{ rows: 8, columns: 7 }}
+          loadingSkeleton={{
+            rows: 10,
+            columnWidths: ["18%", "20%", "18%", "12%", "16%", "16%", "32%"],
+            minWidth: 960,
+          }}
           isEmpty={items.length === 0}
           emptyMessage={
             totalCount === 0 && !query.isFetching
