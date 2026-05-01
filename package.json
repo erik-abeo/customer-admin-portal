@@ -6,6 +6,9 @@
   "description": "Internal web portal for managing remote-database customers, database servers, databases, authorized users, and static database users.",
   "scripts": {
     "dev": "vite",
+    "demo": "vite --mode demo --host 127.0.0.1 --port 5173",
+    "demo:build": "tsc -b && vite build --mode demo",
+    "demo:preview": "npm run demo:build && vite preview --mode demo --host 127.0.0.1 --port 4173 --strictPort",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0",

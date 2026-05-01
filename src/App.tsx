@@ -25,6 +25,7 @@ import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
 import { PageFallback } from "@/components/common/PageFallback";
 import { RootErrorBoundary } from "@/components/layout/RootErrorBoundary";
 import { env } from "@/config/env";
+import { DemoBanner } from "@/demo/DemoBanner";
 import { installAuditLog } from "@/lib/auditLog";
 import { installAuditSink } from "@/lib/auditSink";
 import { MutationProgress } from "@/lib/mutationProgress";
@@ -205,6 +206,16 @@ export function App() {
     installAuditSink();
   }, []);
 
+  // The banner is bottom-fixed and adds padding-bottom to the body so
+  // it never overlaps the actual page content. We toggle the class
+  // here rather than at module-load time so SSR / hydration stays
+  // deterministic and the banner can be dismissed without a reload.
+  useEffect(() => {
+    if (!env.demoMode) return;
+    document.body.classList.add("demo-mode");
+    return () => document.body.classList.remove("demo-mode");
+  }, []);
+
   return (
     <RootErrorBoundary>
       <MantineProvider theme={theme} defaultColorScheme="auto">
@@ -226,6 +237,9 @@ export function App() {
               )}
             </AuthProvider>
           </QueryClientProvider>
+          {env.demoMode && (
+            <DemoBanner onDismiss={() => document.body.classList.remove("demo-mode")} />
+          )}
         </ModalsProvider>
       </MantineProvider>
     </RootErrorBoundary>

@@ -19,6 +19,7 @@ import { useForm } from "@mantine/form";
 import {
   IconAlertTriangle,
   IconArrowBigUpLine,
+  IconFlask2,
   IconLock,
   IconShieldLock,
 } from "@tabler/icons-react";
@@ -158,10 +159,25 @@ export function LoginPage() {
 
                   <Divider />
 
+                  {env.demoMode && (
+                    <Alert
+                      color="violet"
+                      variant="light"
+                      icon={<IconFlask2 size={16} />}
+                      title="Demo mode"
+                    >
+                      <Text size="xs">
+                        The portal is running on in-memory fixtures. Sign in with{" "}
+                        <Code>any name</Code> and <Code>any key</Code> — no real backend
+                        will be contacted.
+                      </Text>
+                    </Alert>
+                  )}
+
                   <TextInput
                     label="Your admin name"
                     description="Used to attribute administrative actions in the audit log."
-                    placeholder="erik.griffin"
+                    placeholder={env.demoMode ? "demo.admin" : "erik.griffin"}
                     autoComplete="username"
                     size="md"
                     required
@@ -170,13 +186,23 @@ export function LoginPage() {
                   <PasswordInput
                     label="Management API key"
                     description={
-                      <Text size="xs" c="dimmed">
-                        The <Code>api-key</Code> value from{" "}
-                        <Code>ClientRemoteDatabaseAccessAPI</Code>&apos;s{" "}
-                        <Code>appsettings.json</Code>.
-                      </Text>
+                      env.demoMode ? (
+                        <Text size="xs" c="dimmed">
+                          Any non-empty value is accepted in demo mode.
+                        </Text>
+                      ) : (
+                        <Text size="xs" c="dimmed">
+                          The <Code>api-key</Code> value from{" "}
+                          <Code>ClientRemoteDatabaseAccessAPI</Code>&apos;s{" "}
+                          <Code>appsettings.json</Code>.
+                        </Text>
+                      )
                     }
-                    placeholder="••••••••-••••-••••-••••-••••••••••••"
+                    placeholder={
+                      env.demoMode
+                        ? "any-value-works-in-demo"
+                        : "••••••••-••••-••••-••••-••••••••••••"
+                    }
                     autoComplete="current-password"
                     size="md"
                     required

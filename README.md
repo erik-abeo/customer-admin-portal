@@ -57,6 +57,26 @@ Open <http://localhost:5173>. You will be sent to the login screen on first
 load — enter your admin name and the API key (the value of the `api-key`
 setting in `ClientRemoteDatabaseAccessAPI`'s `appsettings.json`).
 
+### Demo mode (no backend required)
+
+For walkthroughs, screen-recordings, and design reviews where the ASP.NET
+backend is unavailable, the portal ships an in-memory adapter that serves
+realistic fixture data for every endpoint. Mutations (create / edit /
+delete) persist for the lifetime of the tab and reset on reload.
+
+```bash
+npm install
+npm run demo            # vite dev server on http://127.0.0.1:5173
+# or, to demo the production build:
+npm run demo:preview    # builds with --mode demo and serves on :4173
+```
+
+In demo mode any non-empty admin name and any non-empty API key will sign
+you in. A persistent banner at the bottom of every page makes the demo
+state unmistakable; click **Reset data** in the banner to re-seed the
+fixtures. Implementation lives in [`src/demo/`](./src/demo/) — start at
+`installDemo.ts`.
+
 ### Build-time environment variables
 
 | Variable                     | Required | Description                                                                                                                                                                                             |
@@ -139,6 +159,12 @@ src/
     auditLog.ts             # Response observer that records admin writes
     csv.ts                  # RFC-4180-ish CSV builder + downloadCsv helper
     notify.ts               # Notification helpers (success/error)
+  demo/                     # Demo-mode adapter (loaded only when VITE_DEMO_MODE=true)
+    fixtures.ts             #   Realistic seed data
+    demoStore.ts            #   In-memory mutable store
+    demoAdapter.ts          #   Axios adapter routing requests to handlers
+    installDemo.ts          #   One-call entry point
+    DemoBanner.tsx          #   Persistent "Demo mode" banner
   pages/                    # Route-level components, lazy-loaded by App.tsx
   App.tsx                   # Providers + router (lazy routes)
   main.tsx                  # Entry

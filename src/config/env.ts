@@ -90,5 +90,13 @@ export const env = {
    * not to feel aggressive when they walk away.
    */
   idleWarnMinutes: intInRange(import.meta.env.VITE_IDLE_WARN_MINUTES, 1, 0, 30),
+  /**
+   * When true the SPA boots in *demo mode*: every API call is routed
+   * through an in-memory adapter that returns realistic fixture data
+   * (`src/demo/`), and the LoginPage probe trivially succeeds. Use for
+   * demos / dry-runs without the ASP.NET backend running. Never set
+   * this in production environment files.
+   */
+  demoMode: bool(import.meta.env.VITE_DEMO_MODE),
   features,
 } as const;

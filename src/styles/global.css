@@ -322,6 +322,42 @@ body {
   }
 }
 
+/* Demo-mode banner — pinned to the bottom of the viewport so it never
+   collides with the AppShell.Header sticky positioning, but stays
+   visible on every route. The body padding-bottom is added by the
+   App effect (`document.body.classList.add('demo-mode')`) only when
+   the banner is rendered. */
+.demo-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1500;
+  border-bottom: none;
+  border-left: none;
+  border-right: none;
+  border-top: 1px solid rgba(79, 112, 255, 0.4);
+  background: linear-gradient(
+    to right,
+    rgba(79, 112, 255, 0.95),
+    rgba(143, 88, 255, 0.95)
+  );
+  color: #ffffff;
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.18);
+}
+.demo-banner :where(.mantine-Text-root, p, span) {
+  color: #ffffff !important;
+}
+.demo-banner :where(.mantine-Text-root[data-c="dimmed"]) {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+.demo-banner button[aria-label="Hide demo banner"] {
+  color: #ffffff;
+}
+body.demo-mode {
+  padding-bottom: 44px;
+}
+
 /* Page header under-line accent. */
 .page-header-rule {
   height: 1px;
