@@ -22,6 +22,10 @@ import {
  * Mantine's `indigo` and `blue` so it pairs well with both the marketing
  * site and the existing CrystalPM client brand assets. Generated against
  * Mantine's 10-shade scale (lightest → darkest).
+ *
+ * Accessibility: shades 6, 7, and 8 are tuned so that white-on-shade text
+ * passes WCAG AA (4.5:1) on all primary CTAs. The earlier shade-6
+ * (#4f70ff) was 3.97:1, which Lighthouse flagged on filled buttons.
  */
 const crystal: MantineColorsTuple = [
   "#eef3ff",
@@ -29,11 +33,11 @@ const crystal: MantineColorsTuple = [
   "#b6c5ff",
   "#8ea4ff",
   "#6f88ff",
-  "#5a78ff",
-  "#4f70ff", // primary (shade 6)
-  "#4260e6",
-  "#3855cd",
+  "#4263e0", // shade 5 — 5.0:1 against white (dark-mode primary)
+  "#3a5be0", // shade 6 — 5.5:1 against white (light-mode primary)
+  "#2f4ec5",
   "#2a45ad",
+  "#1f3690",
 ];
 
 /** Cool neutral gray used for surfaces, borders, and muted text. */

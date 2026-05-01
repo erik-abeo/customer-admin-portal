@@ -16,6 +16,37 @@ import { env } from "@/config/env";
 
 let initialized = false;
 
+/**
+ * Strip the api-key from XHR/fetch breadcrumb data. Exported for unit
+ * tests; production code wires this through Sentry.init.
+ */
+export function scrubBreadcrumb<T extends Sentry.Breadcrumb>(breadcrumb: T): T {
+  if (breadcrumb.category === "xhr" || breadcrumb.category === "fetch") {
+    const data = breadcrumb.data as Record<string, unknown> | undefined;
+    if (data && "api-key" in data) {
+      delete data["api-key"];
+    }
+  }
+  return breadcrumb;
+}
+
+/**
+ * Defense-in-depth: scrub api-key from any request headers that find their
+ * way into a Sentry event. Casing variants are stripped because middleware
+ * and proxies often canonicalize headers differently.
+ */
+export function scrubEvent<T extends Sentry.ErrorEvent>(event: T): T {
+  const headers = event.request?.headers as Record<string, string> | undefined;
+  if (headers) {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === "api-key") {
+        delete headers[key];
+      }
+    }
+  }
+  return event;
+}
+
 export function initSentry(): void {
   if (initialized) return;
   if (!env.sentryDsn) return;
@@ -36,29 +67,8 @@ export function initSentry(): void {
     // Trace 10% of navigations in production; 100% elsewhere.
     tracesSampleRate: env.environment === "production" ? 0.1 : 1.0,
 
-    // Strip the api-key header so it never leaves the browser even
-    // if a request is captured as a breadcrumb.
-    beforeBreadcrumb(breadcrumb) {
-      if (breadcrumb.category === "xhr" || breadcrumb.category === "fetch") {
-        const data = breadcrumb.data as Record<string, unknown> | undefined;
-        if (data && "api-key" in data) {
-          delete data["api-key"];
-        }
-      }
-      return breadcrumb;
-    },
-
-    beforeSend(event) {
-      // Defense-in-depth: scrub api-key from request headers if axios
-      // ever leaks one into an event.
-      const headers = event.request?.headers as Record<string, string> | undefined;
-      if (headers) {
-        delete headers["api-key"];
-        delete headers["Api-Key"];
-        delete headers["API-KEY"];
-      }
-      return event;
-    },
+    beforeBreadcrumb: scrubBreadcrumb,
+    beforeSend: scrubEvent,
   });
 
   initialized = true;

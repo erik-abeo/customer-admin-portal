@@ -26,6 +26,13 @@ COPY public ./public
 RUN npm run typecheck \
  && npm run build
 
+# Source maps are emitted as "hidden" (no //# sourceMappingURL=) so they
+# can be uploaded to Sentry but never reach customers. Strip them from
+# the artifact that gets shipped to the runtime stage. CI is responsible
+# for `sentry-cli sourcemaps upload dist/` *before* this point if Sentry
+# integration is desired.
+RUN find /app/dist -name "*.map" -type f -delete
+
 # ---- Stage 2: serve via nginx ---------------------------------------------
 FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 

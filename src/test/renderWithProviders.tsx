@@ -10,10 +10,21 @@ interface ProvidersProps {
   initialEntries?: string[];
 }
 
+// Opt into the React Router v7 future flags so the runtime stops
+// emitting the `v7_startTransition` / `v7_relativeSplatPath` warnings
+// against test output. Behavior under these flags matches what we
+// already rely on; the upgrade to v7 will be a no-op semantically.
+const ROUTER_FUTURE_FLAGS = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
+
 function Providers({ children, initialEntries = ["/"] }: ProvidersProps) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="light">
-      <MemoryRouter initialEntries={initialEntries}>{children}</MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries} future={ROUTER_FUTURE_FLAGS}>
+        {children}
+      </MemoryRouter>
     </MantineProvider>
   );
 }

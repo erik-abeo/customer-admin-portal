@@ -24,6 +24,15 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 800,
+    // "hidden" emits .map files alongside the bundle but does NOT add the
+    // `//# sourceMappingURL=` comment that browsers/devtools follow. This
+    // gives Sentry (or any error-tracker) what it needs to symbolicate
+    // stack traces while preventing customers from inspecting raw source
+    // through devtools. The maps should be uploaded to Sentry as a CI step
+    // and then *not* shipped in the runtime container — the Dockerfile
+    // copies `dist/` wholesale today, so a follow-up purge step is
+    // documented in deploy/README.md.
+    sourcemap: "hidden",
     rollupOptions: {
       output: {
         // Split commonly-stable third-party code into its own long-lived

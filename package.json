@@ -40,7 +40,9 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@eslint/js": "^9.39.4",
+    "@lhci/cli": "^0.14.0",
     "@playwright/test": "^1.59.1",
     "@tanstack/react-query-devtools": "^5.59.16",
     "@testing-library/jest-dom": "^6.9.1",

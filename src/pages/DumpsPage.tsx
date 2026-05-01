@@ -11,11 +11,13 @@ import {
   Group,
   Modal,
   Paper,
+  Progress,
   Select,
   Stack,
   Switch,
   Table,
   Text,
+  TextInput,
   Tooltip,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
@@ -67,6 +69,13 @@ export function DumpsPage() {
   return <DumpsLive />;
 }
 
+interface PendingUpload {
+  file: File;
+  databaseServerId: string | null;
+  databaseId: string | null;
+  description: string;
+}
+
 function DumpsLive() {
   const dumps = useDumps();
   const servers = useDatabaseServers();
@@ -82,6 +91,7 @@ function DumpsLive() {
   const [importTarget, setImportTarget] = useState<DumpInfoItem | null>(null);
   const [importTargetDbId, setImportTargetDbId] = useState<string | null>(null);
   const [importReplace, setImportReplace] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
 
   const serverNameById = useMemo(
     () =>
@@ -123,7 +133,7 @@ function DumpsLive() {
     });
   };
 
-  const handleUpload = async (file: File | null) => {
+  const beginUpload = (file: File | null) => {
     if (!file) return;
     if ((servers.data ?? []).length === 0 || (databases.data ?? []).length === 0) {
       notifyError(
@@ -132,17 +142,31 @@ function DumpsLive() {
       );
       return;
     }
-    // Pick the first server/database as a sensible default; backend
-    // owners should improve this with a target-selection dialog.
-    const firstDb = databases.data![0]!;
+    setPendingUpload({
+      file,
+      databaseServerId: null,
+      databaseId: null,
+      description: `Uploaded ${file.name}`,
+    });
+  };
+
+  const cancelUpload = () => {
+    setPendingUpload(null);
+  };
+
+  const confirmUpload = async () => {
+    if (!pendingUpload) return;
+    if (!pendingUpload.databaseServerId || !pendingUpload.databaseId) return;
     try {
       await upload.mutateAsync({
-        file,
-        databaseServerId: firstDb.DatabaseServerId,
-        databaseId: firstDb.Id,
-        description: `Uploaded ${file.name}`,
+        file: pendingUpload.file,
+        databaseServerId: Number(pendingUpload.databaseServerId),
+        databaseId: Number(pendingUpload.databaseId),
+        description:
+          pendingUpload.description.trim() || `Uploaded ${pendingUpload.file.name}`,
       });
-      notifySuccess(`Uploaded ${file.name}`);
+      notifySuccess(`Uploaded ${pendingUpload.file.name}`);
+      setPendingUpload(null);
     } catch (e) {
       notifyError(e, "Failed to upload dump");
     }
@@ -185,13 +209,17 @@ function DumpsLive() {
               </ActionIcon>
             </Tooltip>
             <RequireRole role="admin">
-              <FileButton onChange={handleUpload} accept=".sql,.gz,.sql.gz,.zip">
+              <FileButton onChange={beginUpload} accept=".sql,.gz,.sql.gz,.zip">
                 {(props) => (
                   <Button
                     {...props}
                     variant="default"
                     leftSection={<IconCloudUpload size={16} />}
                     loading={upload.isPending}
+                    disabled={
+                      (servers.data ?? []).length === 0 ||
+                      (databases.data ?? []).length === 0
+                    }
                   >
                     Upload dump
                   </Button>
@@ -434,6 +462,136 @@ function DumpsLive() {
                 disabled={!importTargetDbId}
               >
                 Start import
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+
+      <Modal
+        opened={pendingUpload !== null}
+        onClose={cancelUpload}
+        title={pendingUpload ? `Upload ${pendingUpload.file.name}` : "Upload dump"}
+        size="md"
+        closeOnClickOutside={!upload.isPending}
+        closeOnEscape={!upload.isPending}
+        withCloseButton={!upload.isPending}
+      >
+        {pendingUpload && (
+          <Stack gap="md">
+            <Alert color="yellow" variant="light" title="Confirm target">
+              <Text size="sm">
+                Choose the customer database this dump belongs to. The portal does{" "}
+                <b>not</b> infer the target from the file name — misrouting a dump to
+                the wrong customer is irreversible.
+              </Text>
+            </Alert>
+            <Select
+              label="Database server"
+              placeholder="Select a server"
+              data={(servers.data ?? []).map((s) => ({
+                value: String(s.Id),
+                label: s.Name,
+              }))}
+              value={pendingUpload.databaseServerId}
+              onChange={(v) =>
+                setPendingUpload((p) =>
+                  p
+                    ? {
+                        ...p,
+                        databaseServerId: v,
+                        // Clear the database when the server changes so we
+                        // never carry over a (server, database) pair that
+                        // doesn't actually map.
+                        databaseId: null,
+                      }
+                    : p,
+                )
+              }
+              searchable
+              required
+              disabled={upload.isPending}
+            />
+            <Select
+              label="Target database"
+              placeholder={
+                pendingUpload.databaseServerId
+                  ? "Select a database"
+                  : "Select a server first"
+              }
+              data={(databases.data ?? [])
+                .filter(
+                  (d) =>
+                    pendingUpload.databaseServerId !== null &&
+                    d.DatabaseServerId === Number(pendingUpload.databaseServerId),
+                )
+                .map((d) => ({
+                  value: String(d.Id),
+                  label: `${d.DatabaseName}${
+                    d.CrystalPmId ? ` (CPM #${d.CrystalPmId})` : ""
+                  }`,
+                }))}
+              value={pendingUpload.databaseId}
+              onChange={(v) =>
+                setPendingUpload((p) => (p ? { ...p, databaseId: v } : p))
+              }
+              searchable
+              required
+              disabled={!pendingUpload.databaseServerId || upload.isPending}
+            />
+            <TextInput
+              label="Description"
+              description="Shown in the dumps table. Defaults to the file name."
+              value={pendingUpload.description}
+              onChange={(e) =>
+                setPendingUpload((p) =>
+                  p ? { ...p, description: e.currentTarget.value } : p,
+                )
+              }
+              disabled={upload.isPending}
+            />
+            <Stack gap={4}>
+              <Group justify="space-between" gap="xs">
+                <Text size="xs" c="dimmed">
+                  {formatBytes(pendingUpload.file.size)} · {pendingUpload.file.name}
+                </Text>
+                {upload.isPending && (
+                  <Text size="xs" c="dimmed" ff="monospace">
+                    {upload.progress === null
+                      ? "Sending…"
+                      : `${Math.round(upload.progress * 100)}%`}
+                  </Text>
+                )}
+              </Group>
+              {upload.isPending && (
+                <Progress
+                  // Value of 0 + `striped animated` renders as a moving
+                  // barber-pole indeterminate; once we have a real
+                  // fraction we lock it in and stop animating.
+                  value={upload.progress === null ? 100 : upload.progress * 100}
+                  size="xs"
+                  striped={upload.progress === null}
+                  animated={upload.progress === null}
+                  color="crystal"
+                  aria-label="Upload progress"
+                />
+              )}
+            </Stack>
+            <Group justify="flex-end" gap="xs">
+              <Button
+                variant="default"
+                onClick={cancelUpload}
+                disabled={upload.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmUpload}
+                loading={upload.isPending}
+                leftSection={<IconCloudUpload size={16} />}
+                disabled={!pendingUpload.databaseServerId || !pendingUpload.databaseId}
+              >
+                Upload
               </Button>
             </Group>
           </Stack>

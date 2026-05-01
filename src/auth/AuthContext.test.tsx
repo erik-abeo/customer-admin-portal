@@ -5,6 +5,8 @@ import { getAdminName, getAuthStrategy } from "@/api/httpClient";
 import { AuthProvider } from "./AuthContext";
 import { useAuth } from "./authContextValue";
 
+const STORAGE_KEY = "cap.auth.v1";
+
 function Probe() {
   const { adminName, isAuthenticated, signIn, signOut } = useAuth();
   return (
@@ -91,5 +93,76 @@ describe("AuthProvider", () => {
     const strategy = getAuthStrategy();
     expect(strategy).not.toBeNull();
     expect(strategy!.applyAuthHeaders({})).toEqual({ "api-key": "preset-key" });
+  });
+
+  it("syncs sign-in from another tab via the storage event", () => {
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId("state").textContent).toBe("anon");
+
+    act(() => {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ adminName: "from-tab-2", apiKey: "k" }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: STORAGE_KEY,
+          newValue: sessionStorage.getItem(STORAGE_KEY),
+        }),
+      );
+    });
+
+    expect(screen.getByTestId("state").textContent).toBe("auth:from-tab-2");
+    expect(getAdminName()).toBe("from-tab-2");
+  });
+
+  it("syncs sign-out from another tab via the storage event", () => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ adminName: "before", apiKey: "k" }),
+    );
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId("state").textContent).toBe("auth:before");
+
+    act(() => {
+      sessionStorage.removeItem(STORAGE_KEY);
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: STORAGE_KEY, newValue: null }),
+      );
+    });
+
+    expect(screen.getByTestId("state").textContent).toBe("anon");
+    expect(getAuthStrategy()).toBeNull();
+  });
+
+  it("ignores storage events for unrelated keys", () => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ adminName: "stable", apiKey: "k" }),
+    );
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "some.other.key",
+          newValue: "tampering",
+        }),
+      );
+    });
+
+    expect(screen.getByTestId("state").textContent).toBe("auth:stable");
   });
 });

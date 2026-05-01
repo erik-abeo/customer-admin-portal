@@ -12,17 +12,19 @@ server (typically reverse-proxied by Nginx behind
 
 ## Features
 
-| Section          | Capabilities                                                                                                                                                                                                                                                                                                                          |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Login            | Runtime API-key entry (never embedded in the JS bundle). Probes the API to validate the key before unlocking the app. Auto sign-out on `401`. Cross-tab sync.                                                                                                                                                                         |
-| Dashboard        | Live totals (servers / databases / authorized users / static users) computed from the existing `get-all-*` endpoints, plus quick-action shortcuts. Active-sessions and recent-events tiles are placeholders pending backend endpoints (see [Backend gap](#backend-gap)).                                                              |
-| Database servers | List, create, edit (root password, SSL CA, ports). Detail view shows associated databases. Root password is never displayed; on edit it's a "rotate" field that defaults to leaving the existing value unchanged.                                                                                                                     |
-| Databases        | List, create, edit, filter by server. Drill-down detail view shows the authorized users who have access to that database (uses `GET /My/get-users/{serverId}/{dbId}`).                                                                                                                                                                |
-| Authorized users | List, create, edit, delete. Search by email / static host, filter by host restriction (any vs. static-only) and by whether the user has any database mappings. CSV export. Inline picker for which databases each Supertokens user can access. URL-driven email filter so deep-links from the database detail page survive a refresh. |
-| Static DB users  | List (grouped by username across servers), create, edit, password rotation. Per-server / per-database privilege matrix (SELECT/INSERT/UPDATE/DELETE/CREATE/DROP/GRANT/ALL). One-time secret reveal modal for newly issued passwords.                                                                                                  |
-| Dumps            | Scaffolded UI showing the target shape — disabled until backend endpoints exist. See [Backend gap](#backend-gap).                                                                                                                                                                                                                     |
-| Event log        | Scaffolded UI with the planned filter set — disabled until a read endpoint over `event_log` exists. See [Backend gap](#backend-gap).                                                                                                                                                                                                  |
-| Theming & UX     | CrystalPM-branded header, login, favicon, and loading splash. Light/dark color scheme toggle. Mobile-responsive `AppShell`. Code-split routes (only the visited page is downloaded). Initial loading splash before React mounts.                                                                                                      |
+| Section          | Capabilities                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login            | Runtime API-key entry (never embedded in the JS bundle). Probes the API to validate the key before unlocking the app. Auto sign-out on `401` (any in-flight request returning 401 force-signs the user out). Cross-tab sync.                                                                                                                                                                               |
+| Dashboard        | Live totals (servers / databases / authorized users / static users) from the `get-all-*` endpoints, plus a personalized greeting, API-health badge, and a recent-activity feed sourced from the in-memory audit log.                                                                                                                                                                                       |
+| Database servers | List, create, edit (root password, SSL CA, ports), detail view of associated databases. Optional delete (feature-flagged + RBAC).                                                                                                                                                                                                                                                                          |
+| Databases        | List, create, edit, filter by server. Drill-down detail view shows authorized users for the database. Optional delete (feature-flagged + RBAC).                                                                                                                                                                                                                                                            |
+| Authorized users | List, create, edit, delete, CSV export. Search by email; filter by host restriction (any vs static-only) and by whether the user has any mappings. Inline picker for which databases each Supertokens user can access. URL-driven email filter so deep links from the database detail page survive a refresh.                                                                                              |
+| Static DB users  | List (grouped by username across servers), create, edit, password rotation, per-server / per-database privilege matrix (SELECT/INSERT/UPDATE/DELETE/CREATE/DROP/GRANT/ALL), one-time secret-reveal modal for new passwords. Optional delete (feature-flagged + RBAC).                                                                                                                                      |
+| Dumps            | Full UI when `VITE_FEATURE_DUMPS=true`: register an existing dump, upload a new dump file (multipart with progress + an explicit target-database confirmation modal), trigger import with a "drop & recreate" toggle, edit metadata, delete. When the flag is off the page renders a documented placeholder. See [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md#22-dumps-gated-by-vite_feature_dumps).        |
+| Event log        | Full UI when `VITE_FEATURE_EVENT_LOG=true`: filter by user / IP / server / database / date range / event type, paginated query with `keepPreviousData` for smooth navigation, expandable row details, CSV export with client-side fallback. When the flag is off the page renders a documented placeholder. See [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md#23-event-log-gated-by-vite_feature_event_log). |
+| RBAC             | Optional, gated by `VITE_FEATURE_RBAC`. The portal reads the `X-Admin-Role` response header on every API call (`admin` or `viewer` / `readonly`) and gates write actions accordingly. When the flag is off, all callers are treated as admins.                                                                                                                                                             |
+| Observability    | Opt-in Sentry (`VITE_SENTRY_DSN`) with `api-key` header scrubbing. Opt-in audit-log POST sink (`VITE_FEATURE_AUDIT_SINK` + `VITE_AUDIT_SINK_URL`) that mirrors the in-memory ring buffer to a backend endpoint of your choice.                                                                                                                                                                             |
+| Theming & UX     | CrystalPM-branded header, login, favicon, and loading splash. Light/dark color scheme toggle. Glass-morphism login + header. Mobile-responsive `AppShell`. Code-split routes. Cmd/Ctrl+K command palette. Initial loading splash rendered before React mounts.                                                                                                                                             |
 
 ## Tech stack
 
@@ -30,7 +32,7 @@ server (typically reverse-proxied by Nginx behind
 - **Mantine v7** (UI), **@mantine/form**, **@mantine/modals**,
   **@mantine/notifications**
 - **TanStack Query v5** for server state
-- **React Router v6** for client-side routing (lazy routes via `React.lazy`)
+- **React Router v6** for client-side routing (lazy routes via `React.lazy` with per-route `<Suspense>` boundaries)
 - **Axios** for HTTP, with a swappable auth interceptor and global response
   observer (used by the audit log shim)
 - **Vitest 3** + **happy-dom** + **Testing Library** for unit tests
@@ -170,16 +172,19 @@ All endpoints live on `MyController` in the
 | Authorized users | `GET /My/get-users`, `GET /My/get-users/{serverId}/{dbId}`, `GET /My/get-user/{userId}`, `POST /My/create-user`, `PUT /My/update-user`, `DELETE /My/delete-user/{userId}`                                                                                                         |
 | Static DB users  | `GET /My/get-all-static-database-users`, `GET /My/get-static-database-users-by-server/{serverId}`, `GET /My/get-static-database-users-by-database/{dbId}`, `GET /My/get-static-database-user/{id}`, `POST /My/create-static-database-user`, `PUT /My/update-static-database-user` |
 
-> Server, database, and static-user **delete** endpoints do not exist on the
-> backend, so the portal intentionally exposes no delete UI for them. See
-> [Backend gap](#backend-gap) for the full list of missing endpoints.
+> Server, database, and static-user **delete** endpoints do not yet exist on
+> the backend. The portal ships full delete UI gated behind
+> `VITE_FEATURE_DELETES`. See [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md) for
+> the canonical specification of every pending endpoint and its expected
+> shape.
 
 ## Backend gap
 
 The following Phase 1 spec items cannot be delivered from the SPA alone —
 they require new endpoints on `ClientRemoteDatabaseAccessAPI`. The
-corresponding pages or controls are scaffolded but disabled, so the work is
-unblocked the moment the backend ships.
+corresponding pages or controls are scaffolded behind feature flags. See
+[BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md) for the authoritative API
+contract.
 
 | Spec item                                      | Required endpoint(s)                                                                                                                                                               | Notes                                                                               |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -273,22 +278,23 @@ For environment-specific builds, copy `.env.example` to `.env.production`
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and PR:
+`.github/workflows/ci.yml` runs on every push and PR with three quality
+jobs that must all pass before the Docker image is built:
 
-1. `npm run format:check`
-2. `npm run lint` (`--max-warnings=0`)
-3. `npm run typecheck`
-4. `npm test`
-5. `npm run build` (uploads `dist/` as an artifact)
-6. On `main`, builds the Docker image (no push by default — wire up an ECR
-   `docker/login-action` step when you're ready).
+| Job          | What it runs                                                                                                                                                                                                                                                                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`      | `format:check` → `lint` (`--max-warnings=0`) → `typecheck` → `npm test` → `npm run build`. Uploads `dist/` as an artifact.                                                                                                                                                                                                                                 |
+| `e2e`        | Installs Chromium and runs `npm run test:e2e` against the production bundle (built in test mode). Uploads the HTML report on every run; on failure also uploads `test-results/` (traces, screenshots, videos).                                                                                                                                             |
+| `lighthouse` | Runs `npx lhci autorun` against `http://127.0.0.1:4173/login` three times and asserts the budget in [`lighthouserc.json`](./lighthouserc.json): Performance ≥ 0.9, Accessibility ≥ 0.95, Best-practices ≥ 0.9, CLS ≤ 0.1, plus per-metric warnings on FCP/LCP/TBT/Speed Index/TTI. Median report URL appears in the job log; full reports are an artifact. |
+| `docker`     | On `main` only, builds the runtime image. Waits on **all three** quality jobs above. No push by default — wire up an ECR `docker/login-action` step when you're ready.                                                                                                                                                                                     |
 
 ## Roadmap (post-v1)
 
 - Switch management auth from static key to Supertokens-issued tokens (one
   change in `src/api/httpClient.ts` + `src/auth/AuthContext.tsx`).
-- Wire the Dumps and Event Log pages to real endpoints once the backend
-  ships them (see [Backend gap](#backend-gap)).
+- Ship the Dumps and Event Log endpoints documented in
+  [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md) and flip the corresponding
+  feature flags on (`VITE_FEATURE_DUMPS`, `VITE_FEATURE_EVENT_LOG`).
 - Ship a `/My/admin-audit-log` POST and have `src/lib/auditLog.ts` mirror
   entries to it.
 - Ad-hoc query utility per server/database.

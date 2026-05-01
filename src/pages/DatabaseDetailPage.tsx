@@ -12,14 +12,13 @@ import {
   Title,
 } from "@mantine/core";
 import { IconUsers } from "@tabler/icons-react";
-import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { useAuthorizedUsersForDatabase } from "@/features/authorizedUsers/queries";
-import { useDatabaseServers } from "@/features/databaseServers/queries";
-import { useDatabases } from "@/features/databases/queries";
+import { useDatabaseServer } from "@/features/databaseServers/queries";
+import { useDatabase } from "@/features/databases/queries";
 
 interface FactProps {
   label: string;
@@ -47,18 +46,11 @@ export function DatabaseDetailPage() {
   const { databaseId: databaseIdParam } = useParams();
   const databaseId = databaseIdParam ? Number(databaseIdParam) : undefined;
 
-  const databases = useDatabases();
-  const servers = useDatabaseServers();
+  const databaseQ = useDatabase(databaseId);
+  const database = databaseQ.data;
 
-  const database = useMemo(() => {
-    if (databaseId === undefined) return undefined;
-    return databases.data?.find((d) => d.Id === databaseId);
-  }, [databases.data, databaseId]);
-
-  const server = useMemo(() => {
-    if (!database) return undefined;
-    return servers.data?.find((s) => s.Id === database.DatabaseServerId);
-  }, [database, servers.data]);
+  const serverQ = useDatabaseServer(database?.DatabaseServerId);
+  const server = serverQ.data;
 
   const authorized = useAuthorizedUsersForDatabase(
     database?.DatabaseServerId,
@@ -94,8 +86,9 @@ export function DatabaseDetailPage() {
 
       <Stack gap="lg">
         <QueryStatus
-          isLoading={databases.isLoading || servers.isLoading}
-          error={databases.error ?? servers.error}
+          isLoading={databaseQ.isLoading}
+          error={databaseQ.error}
+          onRetry={() => void databaseQ.refetch()}
         >
           {database ? (
             <Card>

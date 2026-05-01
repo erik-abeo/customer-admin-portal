@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Detail-page deep-links now hit by-id endpoints.** The database detail
+  page previously fetched the full `get-all-database-info` and
+  `get-all-database-server-info` lists and ran a client-side `find()` to
+  locate the requested record — wasteful for direct deep links and
+  blocked on the list query for first paint. The page now uses two
+  dedicated hooks:
+  - `useDatabase(id)` (new) → `GET /My/get-database-info/{id}`, unwraps
+    the `{ Success, Message, DatabaseInfo }` envelope, throws an
+    `ApiError` if the backend reports `Success: false`.
+  - `useDatabaseServer(id)` → `GET /My/get-database-server-info/{id}`
+    (already existed; now reads from the list cache as `placeholderData`
+    so navigations from `/database-servers` paint instantly).
+
+  Both hooks read from their corresponding list cache so navigating from
+  a list page paints the row immediately while the by-id refetch
+  happens in the background. Covered by 7 new tests across
+  `src/features/databases/queries.test.tsx` and
+  `src/features/databaseServers/queries.test.tsx`: success-path unwrap,
+  `Success: false` → `ApiError`, list-cache `placeholderData`, and
+  `enabled: false` when the route param is undefined.
+
+- **Post-auth accessibility coverage in CI.** New `e2e/a11y.e2e.ts`
+  runs `@axe-core/playwright` against every authenticated page —
+  Dashboard, Database servers list, Database server detail, Databases
+  list, Database detail, Authorized users list, Static DB users list —
+  using WCAG 2.0 / 2.1 A + AA tags. This complements the existing
+  per-component axe assertions in `*.test.tsx` and the Lighthouse
+  budget on `/login`, giving full a11y coverage of the rendered
+  bundle. The mock API was extended with dynamic `GET
+/get-database-info/{id}` and `GET /get-database-server-info/{id}`
+  handlers so detail pages render real data in the scanner.
 - **Operational hardening.** Hardened the shipped `nginx.conf` with a
   dedicated `/healthz` liveness endpoint, `Cross-Origin-Opener-Policy`,
   `Cross-Origin-Resource-Policy`, `X-XSS-Protection: 0`, expanded CSP
@@ -36,9 +67,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surface: existing endpoints (DTO crosswalks + error semantics) and
   pending endpoints (deletes, dumps, event log, audit sink) with full
   URL, query, body, and response specifications.
+- **CI: Playwright job.** The GitHub Actions workflow now runs the E2E
+  suite after the build job, uploads the HTML report on every run, and
+  uploads `test-results/` (traces + screenshots + videos) on failure.
+  The Docker image build now waits on `build`, `e2e`, and `lighthouse`.
+- **CI: Lighthouse CI** (`lighthouserc.json` + `lighthouse` job in the
+  workflow). Runs against the production build of `/login` three times
+  per CI run and asserts against an enforced budget: Performance ≥ 0.9,
+  Accessibility ≥ 0.95, Best-practices ≥ 0.9, plus per-metric warns
+  (FCP ≤ 1.8 s, LCP ≤ 2.5 s, TBT ≤ 200 ms, CLS ≤ 0.1). Reports are
+  uploaded as job artifacts and to Lighthouse's temporary public
+  storage. Median report URL appears in the job log.
+- **E2E: dump-upload modal flow.** New `e2e/dumps-upload.e2e.ts`
+  exercises the regression fix end-to-end: opening the modal from a
+  file pick, the disabled-until-both-targets state, server↔database
+  reset semantics, multipart POST capture, and the success notification.
+  Adds dumps + event-log routes plus a dynamic `/upload-dump` handler
+  to `e2e/helpers/mockApi.ts`.
+- **Unit: `useUploadDump` progress tracking.** New
+  `src/features/dumps/queries.test.tsx` (5 cases) verifies the
+  `progress: number | null` exposure: idle state, fractional updates,
+  saturation at 1.0 when proxies double-count, ignored events with
+  total ≤ 0, and reset to null on both success and error.
+- **Test coverage** for previously untested critical paths:
+  `httpClient` request/response observer + auth-header injection +
+  X-Admin-User capture (7 tests), `<RequireRole>` gating with a mocked
+  `features.rbac=true` (5 tests), Sentry `beforeSend` / `beforeBreadcrumb`
+  api-key scrubbing (6 tests), `AuthContext` cross-tab `storage` event
+  hydration / sign-out / unrelated-key isolation (3 tests),
+  `safeRedirect` (7 tests). The full quality gate is now **88 unit
+  tests** across **17 files**, **15 Playwright E2E tests** across **4
+  files** (8 functional + 7 a11y under axe-core), and **Lighthouse CI**
+  on the production bundle.
 
 ### Fixed
 
+- **`<NavigationProgress>` had no accessible name.** Mantine's
+  `NavigationProgress` always renders a `[role="progressbar"]` element
+  (its visibility is purely cosmetic, gated on `data-mounted`), and axe
+  flagged it as `aria-progressbar-name` on every authenticated page.
+  Fixed by passing `aria-label="Page loading"` to `NavigationProgress`,
+  which Mantine's `<Progress>` forwards to the progressbar element.
+  Verified by the new `e2e/a11y.e2e.ts` suite, which scans every
+  authenticated page with strict WCAG 2.0/2.1 AA tags.
+- **Auto sign-out on 401 now actually fires.** The previous
+  `unhandledrejection` handler never observed API errors because
+  TanStack Query catches them. Replaced with an `addResponseListener`
+  subscription on the shared HTTP client, so any 401 from any in-flight
+  request force-signs the user out exactly once per session. Covered by
+  `src/api/httpClient.responseListener.test.ts` (7 tests including a
+  full request/response round-trip with a mocked Axios adapter).
+- **`/login` blank-screen risk.** The lazy-loaded `LoginPage` lived
+  outside the protected `AppLayout` (which carries its own Suspense
+  boundary), so a direct hit to `/login` could flash a blank screen
+  while the chunk fetched. The route now has a dedicated `<Suspense>`
+  with the brand-tinted `PageFallback`.
+- **Open-redirect tightening on login.** The post-login `redirect`
+  query parameter previously rejected absolute URLs with a naive
+  `startsWith("/")` check, which lets `//evil.com` slip through.
+  Extracted to `src/auth/redirectSafety.ts` and now also rejects
+  protocol-relative URLs (`//host`), backslash-escape variants
+  (`/\host`), and malformed percent-encodings. Covered by
+  `src/auth/redirectSafety.test.ts` (7 tests).
+- **Dump-file uploads no longer silently target the first database.**
+  `DumpsPage` now opens a target-confirmation modal that requires the
+  operator to pick a server and database before the upload is issued.
+  The upload mutation also surfaces a 0..1 progress fraction; the modal
+  renders a real progress bar (or an indeterminate animation while the
+  first byte is in flight).
+- **Stale Dashboard alert / placeholders.** The "some Phase 1 modules
+  require backend work" alert now respects `VITE_FEATURE_DUMPS` and
+  `VITE_FEATURE_EVENT_LOG` (it disappears when both are on, and adapts
+  copy when only one is off). The recent-events placeholder upgrades
+  to a live navigation card when `VITE_FEATURE_EVENT_LOG` is enabled.
+  The alert now points at `BACKEND-CONTRACT.md` instead of a removed
+  README anchor.
+- **Stale README claims.** The feature table no longer describes Dumps
+  and Event Log as "scaffolded UI" — both ship as full feature-flagged
+  experiences. Cross-references now point at `BACKEND-CONTRACT.md`.
+- **Brand color contrast.** The Crystal brand palette's shades 5 and 6
+  were darkened from `#5a78ff`/`#4f70ff` to `#4263e0`/`#3a5be0` so that
+  white text on filled primary buttons passes WCAG AA (≥ 4.5:1) in both
+  light and dark modes. Lighthouse previously flagged the Sign-in
+  button at 3.77:1; the new shades measure 5.0:1 and 5.5:1.
+- **Source maps no longer reach customers.** Vite now emits
+  `sourcemap: "hidden"` and the Dockerfile strips `*.map` files before
+  shipping `dist/` into the runtime stage. CI uploads the maps to
+  Sentry (when configured) so production stack traces remain
+  symbolicatable. See `deploy/README.md`.
 - **Progress-bar coordination.** `MutationProgress` and `PageFallback`
   both drove `@mantine/nprogress` independently, so a finishing
   mutation could prematurely hide the bar mid route-load (and vice

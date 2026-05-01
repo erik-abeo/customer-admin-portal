@@ -27,6 +27,7 @@ import { useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@/auth/authContextValue";
+import { safeRedirect } from "@/auth/redirectSafety";
 import { env } from "@/config/env";
 
 interface LoginValues {
@@ -58,16 +59,7 @@ export function LoginPage() {
     }
   };
 
-  const redirect = (() => {
-    const raw = searchParams.get("redirect");
-    if (!raw) return "/";
-    try {
-      const decoded = decodeURIComponent(raw);
-      return decoded.startsWith("/") ? decoded : "/";
-    } catch {
-      return "/";
-    }
-  })();
+  const redirect = safeRedirect(searchParams.get("redirect"));
 
   const form = useForm<LoginValues>({
     initialValues: { adminName: "", apiKey: "" },

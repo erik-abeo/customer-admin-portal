@@ -36,7 +36,7 @@ import {
 } from "@/components/common/MetricCard";
 import { PageHeader } from "@/components/common/PageHeader";
 import { RecentActivity } from "@/components/common/RecentActivity";
-import { env } from "@/config/env";
+import { env, features } from "@/config/env";
 import { useAuthorizedUsers } from "@/features/authorizedUsers/queries";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { useDatabases } from "@/features/databases/queries";
@@ -217,12 +217,27 @@ export function DashboardPage() {
                   tone="gray"
                   reason="Backend exposes per-user kill, but no list endpoint over database_user_cache yet."
                 />
-                <PlaceholderMetricCard
-                  icon={IconList}
-                  label="Recent events"
-                  tone="gray"
-                  reason="event_log table is populated, but no read endpoint is exposed yet."
-                />
+                {features.eventLog ? (
+                  <MetricCard
+                    to="/event-log"
+                    icon={IconList}
+                    label="Event log"
+                    // No aggregate count yet — the card serves as a
+                    // navigation entry point. The MetricCard renders an
+                    // em-dash when value is null.
+                    value={null}
+                    isLoading={false}
+                    description="Open the viewer to filter by user, IP, or database."
+                    tone="primary"
+                  />
+                ) : (
+                  <PlaceholderMetricCard
+                    icon={IconList}
+                    label="Recent events"
+                    tone="gray"
+                    reason="event_log table is populated, but no read endpoint is exposed yet."
+                  />
+                )}
               </SimpleGrid>
             </Stack>
           </Grid.Col>
@@ -280,32 +295,52 @@ export function DashboardPage() {
           </SimpleGrid>
         </Stack>
 
-        <Alert
-          icon={<IconAlertTriangle size={18} />}
-          color="yellow"
-          variant="light"
-          radius="md"
-          title="Some Phase 1 modules require backend work"
-        >
-          <Text size="sm">
-            <Anchor component={Link} to="/dumps">
-              Database Dumps
-            </Anchor>{" "}
-            and{" "}
-            <Anchor component={Link} to="/event-log">
-              Event Log Viewer
-            </Anchor>{" "}
-            are scaffolded with the target UI but await new endpoints on{" "}
-            <Text span ff="monospace" size="sm">
-              ClientRemoteDatabaseAccessAPI
+        {(!features.dumps || !features.eventLog) && (
+          <Alert
+            icon={<IconAlertTriangle size={18} />}
+            color="yellow"
+            variant="light"
+            radius="md"
+            title="Some Phase 1 modules require backend work"
+          >
+            <Text size="sm">
+              {!features.dumps && !features.eventLog ? (
+                <>
+                  <Anchor component={Link} to="/dumps">
+                    Database Dumps
+                  </Anchor>{" "}
+                  and{" "}
+                  <Anchor component={Link} to="/event-log">
+                    Event Log Viewer
+                  </Anchor>{" "}
+                  are scaffolded with the target UI but await new endpoints on{" "}
+                </>
+              ) : !features.dumps ? (
+                <>
+                  <Anchor component={Link} to="/dumps">
+                    Database Dumps
+                  </Anchor>{" "}
+                  is scaffolded with the target UI but awaits new endpoints on{" "}
+                </>
+              ) : (
+                <>
+                  <Anchor component={Link} to="/event-log">
+                    Event Log Viewer
+                  </Anchor>{" "}
+                  is scaffolded with the target UI but awaits new endpoints on{" "}
+                </>
+              )}
+              <Text span ff="monospace" size="sm">
+                ClientRemoteDatabaseAccessAPI
+              </Text>
+              . See{" "}
+              <Text span ff="monospace" size="sm">
+                BACKEND-CONTRACT.md
+              </Text>{" "}
+              for the full list of required endpoints and what each unlocks.
             </Text>
-            . See the README{" "}
-            <Text span fs="italic">
-              Backend gap
-            </Text>{" "}
-            section for the full list of required APIs and what each one unlocks.
-          </Text>
-        </Alert>
+          </Alert>
+        )}
 
         <Group gap="xs" justify="center">
           <IconFileDatabase

@@ -27,3 +27,6 @@ vite.config.ts.timestamp-*
 /playwright-report/
 /test-results/
 /coverage/
+
+# Lighthouse CI artifacts (uploaded as a CI job artifact instead)
+/.lighthouseci/

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { dumpsApi } from "@/api/dumps";
 import type {
@@ -51,27 +52,46 @@ export function useImportDump() {
   });
 }
 
+/**
+ * Upload mutation that surfaces a 0..1 progress fraction to the caller.
+ * `progress` is `null` while idle and during the brief "request issued
+ * but no upload-progress event yet" window — render an indeterminate
+ * indicator in that case.
+ */
 export function useUploadDump() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: {
+  const [progress, setProgress] = useState<number | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async (args: {
       file: File;
       databaseServerId: number;
       databaseId: number;
       description?: string | null;
-      onProgress?: (loaded: number, total: number) => void;
-    }) =>
-      dumpsApi.upload(
+    }) => {
+      setProgress(null);
+      return dumpsApi.upload(
         args.file,
         {
           databaseServerId: args.databaseServerId,
           databaseId: args.databaseId,
           description: args.description ?? null,
         },
-        args.onProgress,
-      ),
+        (loaded, total) => {
+          if (total > 0) {
+            setProgress(Math.min(1, loaded / total));
+          }
+        },
+      );
+    },
+    onSettled: () => setProgress(null),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
   });
+
+  // Mantine's <Progress value={0..100} animated /> takes a finite value,
+  // so callers should treat `null` as "indeterminate" (use the `animated`
+  // prop in that case).
+  return Object.assign(mutation, { progress });
 }
 
 export const dumpKeys = KEYS;

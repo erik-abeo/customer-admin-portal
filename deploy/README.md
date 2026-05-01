@@ -76,6 +76,43 @@ The shipped `nginx.conf` enforces:
 
 If you point the SPA at a different API origin, add it to `connect-src`.
 
+## Source maps and Sentry
+
+The Vite build emits source maps as `sourcemap: "hidden"` — the `.map`
+files are produced alongside each chunk but the bundle does **not**
+contain a `//# sourceMappingURL=` comment. This means:
+
+- Browsers and devtools cannot resolve readable source from the shipped
+  bundle (good for a customer-facing admin tool).
+- Symbolicators with direct access to the maps (Sentry, Rollbar, etc.)
+  can still de-minify stack traces.
+
+The Dockerfile **deletes** `*.map` files from `/app/dist` before copying
+into the runtime stage, so maps never reach customers. To wire up Sentry
+symbolication, upload the maps to your Sentry project before that delete
+runs in CI:
+
+```bash
+# In your CI job, after `npm run build` and before `docker build`:
+npx @sentry/cli sourcemaps upload \
+  --org "$SENTRY_ORG" \
+  --project "$SENTRY_PROJECT" \
+  --release "$(node -p "require('./package.json').version")" \
+  --url-prefix "~/" \
+  ./dist
+```
+
+The release identifier must match the value Vite injects into the bundle
+via `__APP_VERSION__` (which is read from `package.json`'s `version`
+field — see `vite.config.ts`). Sentry then matches a runtime stack trace
+to the uploaded maps via that release id and the chunk filename.
+
+If you want to embed Sentry source-map upload into the image build, do
+it in a separate CI job that runs `npm run build`, uploads maps, and
+then triggers `docker build --target runtime` with the pre-built `dist/`
+directory mounted in. The repo's `Dockerfile` already deletes maps so
+nothing extra is required to keep them out of the runtime container.
+
 ## Secret rotation
 
 Sensitive values live in AWS Secrets Manager (or the equivalent). Rotation
