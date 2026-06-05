@@ -6,7 +6,6 @@ interface ImportMetaEnv {
   readonly VITE_APP_NAME?: string;
 
   // Feature flags (string "true"/"1"/"yes"/"on" enables).
-  readonly VITE_FEATURE_DUMPS?: string;
   readonly VITE_FEATURE_EVENT_LOG?: string;
   readonly VITE_FEATURE_DELETES?: string;
   readonly VITE_FEATURE_RBAC?: string;

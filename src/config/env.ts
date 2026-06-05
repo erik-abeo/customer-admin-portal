@@ -50,8 +50,6 @@ function intInRange(
  * hidden / disabled. Default = off everywhere.
  */
 export const features = {
-  /** Enables the Dumps page (requires backend dump endpoints). */
-  dumps: bool(import.meta.env.VITE_FEATURE_DUMPS),
   /** Enables the Event Log viewer (requires backend event-log endpoints). */
   eventLog: bool(import.meta.env.VITE_FEATURE_EVENT_LOG),
   /** Enables Delete actions for servers / databases / static users. */

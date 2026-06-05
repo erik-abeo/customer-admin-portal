@@ -2,7 +2,6 @@ import { useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { Spotlight, type SpotlightActionData } from "@mantine/spotlight";
 import {
   IconDatabase,
-  IconFileDatabase,
   IconHome,
   IconKey,
   IconList,
@@ -73,14 +72,6 @@ export function CommandPalette() {
         keywords: ["service", "privileges", "system"],
         leftSection: <IconKey size={18} stroke={1.7} />,
         onClick: () => navigate("/static-users"),
-      },
-      {
-        id: "nav-dumps",
-        label: "Dumps",
-        description: "Database dumps and imports (backend pending)",
-        keywords: ["backup", "restore", "import"],
-        leftSection: <IconFileDatabase size={18} stroke={1.7} />,
-        onClick: () => navigate("/dumps"),
       },
       {
         id: "nav-event-log",

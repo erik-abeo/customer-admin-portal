@@ -234,66 +234,6 @@ export interface GetStaticDatabaseUserDetailResponse extends GetStaticDatabaseUs
   DatabasePrivileges: DatabasePrivilegeInfo[];
 }
 
-// ---------- Dumps (PENDING BACKEND, see BACKEND-CONTRACT.md) ----------
-
-export interface DumpInfoItem {
-  Id: number;
-  Name: string;
-  DatabaseServerId: number;
-  DatabaseId: number;
-  FilePath: string;
-  Description: string | null;
-  SizeBytes: number | null;
-  CreatedDateTimeUtc: string;
-  LastModifiedDateTimeUtc: string;
-}
-
-export interface GetAllDumpsResponse {
-  Success: boolean;
-  Message: string | null;
-  Dumps: DumpInfoItem[];
-}
-
-export interface CreateDumpRequest {
-  Name: string;
-  DatabaseServerId: number;
-  DatabaseId: number;
-  FilePath: string;
-  Description: string | null;
-}
-
-export interface CreateDumpResponse {
-  Success: boolean;
-  Message: string | null;
-  Id: number;
-}
-
-export interface UpdateDumpRequest {
-  Id: number;
-  Name?: string | null;
-  Description?: string | null;
-  FilePath?: string | null;
-}
-
-export interface UpdateDumpResponse {
-  Success: boolean;
-  Message: string | null;
-}
-
-export interface ImportDumpRequest {
-  DumpId: number;
-  TargetDatabaseId: number;
-  /** When true, drops & recreates the target database before import. */
-  Replace: boolean;
-}
-
-export interface ImportDumpResponse {
-  Success: boolean;
-  Message: string | null;
-  /** Server-side job ID, useful for status polling once that lands. */
-  JobId: string | null;
-}
-
 // ---------- Event Log (PENDING BACKEND, see BACKEND-CONTRACT.md) ----------
 
 export interface EventLogEntry {

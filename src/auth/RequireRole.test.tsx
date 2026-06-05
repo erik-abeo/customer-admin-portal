@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/config/env", () => ({
   features: {
     rbac: true,
-    dumps: false,
     eventLog: false,
     deletes: false,
     auditSink: false,
@@ -27,7 +26,6 @@ vi.mock("@/config/env", () => ({
     auditSinkUrl: undefined,
     features: {
       rbac: true,
-      dumps: false,
       eventLog: false,
       deletes: false,
       auditSink: false,

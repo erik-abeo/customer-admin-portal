@@ -9,7 +9,6 @@
  *   - 5 authorized users with mixed host restrictions and access maps
  *   - 4 static DB users (some present on multiple servers so the
  *     grouping logic in StaticUsersPage has interesting input)
- *   - 8 backup dumps with varied sizes and timestamps
  *   - A stream of recent event-log entries so the EventLog page renders
  *     non-empty
  *
@@ -21,7 +20,6 @@ import type {
   DatabaseInfoItem,
   DatabasePrivileges,
   DatabaseServerInfoItem,
-  DumpInfoItem,
   EventLogEntry,
   GetStaticDatabaseUserResponse,
 } from "@/api/types";
@@ -241,97 +239,6 @@ export const seedStaticUserPrivileges: Record<
   ],
 };
 
-export const seedDumps: DumpInfoItem[] = [
-  {
-    Id: 5001,
-    Name: "acme_2026-04-30_nightly",
-    DatabaseServerId: 1,
-    DatabaseId: 100,
-    FilePath: "/dumps/acme/acme_2026-04-30.sql.gz",
-    Description: "Acme nightly automated dump",
-    SizeBytes: 487_233_104,
-    CreatedDateTimeUtc: HOURS_AGO(6),
-    LastModifiedDateTimeUtc: HOURS_AGO(6),
-  },
-  {
-    Id: 5002,
-    Name: "globex_2026-04-29_nightly",
-    DatabaseServerId: 1,
-    DatabaseId: 101,
-    FilePath: "/dumps/globex/globex_2026-04-29.sql.gz",
-    Description: "Globex nightly automated dump",
-    SizeBytes: 142_881_212,
-    CreatedDateTimeUtc: HOURS_AGO(30),
-    LastModifiedDateTimeUtc: HOURS_AGO(30),
-  },
-  {
-    Id: 5003,
-    Name: "initech_2026-04-28_pre_upgrade",
-    DatabaseServerId: 1,
-    DatabaseId: 102,
-    FilePath: "/dumps/initech/initech_2026-04-28_pre_upgrade.sql",
-    Description: "Pre-upgrade snapshot before schema migration v18.4 → v18.5",
-    SizeBytes: 612_483_040,
-    CreatedDateTimeUtc: DAYS_AGO(2),
-    LastModifiedDateTimeUtc: DAYS_AGO(2),
-  },
-  {
-    Id: 5004,
-    Name: "umbrella_initial_seed",
-    DatabaseServerId: 2,
-    DatabaseId: 103,
-    FilePath: "/dumps/umbrella/initial_seed.sql.gz",
-    Description: "Initial seed from on-prem migration",
-    SizeBytes: 2_104_998_040,
-    CreatedDateTimeUtc: DAYS_AGO(7),
-    LastModifiedDateTimeUtc: DAYS_AGO(7),
-  },
-  {
-    Id: 5005,
-    Name: "wayne_2026-04-29_nightly",
-    DatabaseServerId: 3,
-    DatabaseId: 104,
-    FilePath: "/dumps/wayne/wayne_2026-04-29.sql.gz",
-    Description: "Wayne nightly automated dump",
-    SizeBytes: 318_492_018,
-    CreatedDateTimeUtc: HOURS_AGO(28),
-    LastModifiedDateTimeUtc: HOURS_AGO(28),
-  },
-  {
-    Id: 5006,
-    Name: "stark_2026-04-30_adhoc",
-    DatabaseServerId: 3,
-    DatabaseId: 105,
-    FilePath: "/dumps/stark/stark_2026-04-30_adhoc.sql.gz",
-    Description: "Ad-hoc snapshot requested by support",
-    SizeBytes: 89_412_993,
-    CreatedDateTimeUtc: HOURS_AGO(3),
-    LastModifiedDateTimeUtc: HOURS_AGO(3),
-  },
-  {
-    Id: 5007,
-    Name: "acme_2026-04-23_weekly",
-    DatabaseServerId: 1,
-    DatabaseId: 100,
-    FilePath: "/dumps/acme/acme_2026-04-23_weekly.sql.gz",
-    Description: "Weekly retention copy",
-    SizeBytes: 472_119_402,
-    CreatedDateTimeUtc: DAYS_AGO(7),
-    LastModifiedDateTimeUtc: DAYS_AGO(7),
-  },
-  {
-    Id: 5008,
-    Name: "globex_2026-04-23_weekly",
-    DatabaseServerId: 1,
-    DatabaseId: 101,
-    FilePath: "/dumps/globex/globex_2026-04-23_weekly.sql.gz",
-    Description: "Weekly retention copy",
-    SizeBytes: 138_201_005,
-    CreatedDateTimeUtc: DAYS_AGO(7),
-    LastModifiedDateTimeUtc: DAYS_AGO(7),
-  },
-];
-
 export const seedEventLog: EventLogEntry[] = [
   {
     Id: 9001,
@@ -387,17 +294,6 @@ export const seedEventLog: EventLogEntry[] = [
     EventType: "LoginFailure",
     Message: "Static-host check failed",
     Details: "Expected 203.0.113.10 but request originated from 198.51.100.66",
-  },
-  {
-    Id: 9006,
-    TimestampUtc: HOURS_AGO(6.0),
-    UserEmail: null,
-    IpAddress: null,
-    DatabaseServerId: 1,
-    DatabaseId: 100,
-    EventType: "DumpCompleted",
-    Message: "Nightly dump uploaded (487 MB)",
-    Details: null,
   },
   {
     Id: 9007,

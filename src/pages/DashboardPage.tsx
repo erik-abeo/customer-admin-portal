@@ -295,7 +295,7 @@ export function DashboardPage() {
           </SimpleGrid>
         </Stack>
 
-        {(!features.dumps || !features.eventLog) && (
+        {!features.eventLog && (
           <Alert
             icon={<IconAlertTriangle size={18} />}
             color="yellow"
@@ -304,32 +304,10 @@ export function DashboardPage() {
             title="Some Phase 1 modules require backend work"
           >
             <Text size="sm">
-              {!features.dumps && !features.eventLog ? (
-                <>
-                  <Anchor component={Link} to="/dumps">
-                    Database Dumps
-                  </Anchor>{" "}
-                  and{" "}
-                  <Anchor component={Link} to="/event-log">
-                    Event Log Viewer
-                  </Anchor>{" "}
-                  are scaffolded with the target UI but await new endpoints on{" "}
-                </>
-              ) : !features.dumps ? (
-                <>
-                  <Anchor component={Link} to="/dumps">
-                    Database Dumps
-                  </Anchor>{" "}
-                  is scaffolded with the target UI but awaits new endpoints on{" "}
-                </>
-              ) : (
-                <>
-                  <Anchor component={Link} to="/event-log">
-                    Event Log Viewer
-                  </Anchor>{" "}
-                  is scaffolded with the target UI but awaits new endpoints on{" "}
-                </>
-              )}
+              <Anchor component={Link} to="/event-log">
+                Event Log Viewer
+              </Anchor>{" "}
+              is scaffolded with the target UI but awaits new endpoints on{" "}
               <Text span ff="monospace" size="sm">
                 ClientRemoteDatabaseAccessAPI
               </Text>

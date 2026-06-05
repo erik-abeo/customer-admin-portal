@@ -16,7 +16,7 @@
  *     System.Text.Json defaults) the real backend will return, so the
  *     UI cannot tell the difference.
  *   - Mutations write into the in-memory store so the demo can show
- *     "create a server", "edit a user", "delete a dump" end-to-end.
+ *     "create a server", "edit a user", "delete a static user" end-to-end.
  *   - Each write also appends a synthetic event-log entry so the Event
  *     Log page reflects what the demonstrator just did.
  */
@@ -31,20 +31,16 @@ import type {
   AuthorizedUserInfoItem,
   CreateDatabaseInfoRequest,
   CreateDatabaseServerInfoRequest,
-  CreateDumpRequest,
   CreateStaticDatabaseUserRequest,
   CreateUserRequest,
   DatabaseInfoItem,
   DatabasePrivilegeInfo,
   DatabaseServerInfoItem,
-  DumpInfoItem,
   EventLogEntry,
   EventLogQueryResponse,
   GetStaticDatabaseUserDetailResponse,
-  ImportDumpRequest,
   UpdateDatabaseInfoRequest,
   UpdateDatabaseServerInfoRequest,
-  UpdateDumpRequest,
   UpdateStaticDatabaseUserRequest,
   UpdateUserRequest,
 } from "@/api/types";
@@ -491,116 +487,6 @@ const ROUTES: Route[] = [
         `Deleted static DB user ${removed.UserName} on server ${removed.DatabaseServerId}`,
       );
       return ok({ Success: true, Message: null });
-    },
-  },
-
-  // ---------- Dumps ----------
-  {
-    method: "GET",
-    pattern: /^\/get-all-dumps$/,
-    handle: ({ search }) => {
-      const serverId = search.get("databaseServerId");
-      const databaseId = search.get("databaseId");
-      let dumps: DumpInfoItem[] = demoStore.dumps;
-      if (serverId) {
-        dumps = dumps.filter((d) => d.DatabaseServerId === Number(serverId));
-      }
-      if (databaseId) {
-        dumps = dumps.filter((d) => d.DatabaseId === Number(databaseId));
-      }
-      return ok({ Success: true, Message: null, Dumps: dumps });
-    },
-  },
-  {
-    method: "POST",
-    pattern: /^\/create-dump$/,
-    handle: ({ body }) => {
-      const req = body as CreateDumpRequest;
-      const next: DumpInfoItem = {
-        Id: demoStore.dumpIds.next(),
-        Name: req.Name,
-        DatabaseServerId: req.DatabaseServerId,
-        DatabaseId: req.DatabaseId,
-        FilePath: req.FilePath,
-        Description: req.Description,
-        SizeBytes: null,
-        CreatedDateTimeUtc: new Date().toISOString(),
-        LastModifiedDateTimeUtc: new Date().toISOString(),
-      };
-      demoStore.dumps.unshift(next);
-      demoStore.recordAdminEvent(`Registered dump ${next.Name}`);
-      return ok({ Success: true, Message: null, Id: next.Id });
-    },
-  },
-  {
-    method: "POST",
-    pattern: /^\/upload-dump$/,
-    handle: () => {
-      // Multipart bodies arrive as FormData; we don't try to parse them
-      // in demo mode — just simulate a successful upload.
-      const id = demoStore.dumpIds.next();
-      const next: DumpInfoItem = {
-        Id: id,
-        Name: `uploaded_demo_${id}`,
-        DatabaseServerId: 1,
-        DatabaseId: 100,
-        FilePath: `/dumps/uploads/uploaded_demo_${id}.sql.gz`,
-        Description: "Uploaded via demo mode",
-        SizeBytes: 12_345_678,
-        CreatedDateTimeUtc: new Date().toISOString(),
-        LastModifiedDateTimeUtc: new Date().toISOString(),
-      };
-      demoStore.dumps.unshift(next);
-      demoStore.recordAdminEvent(`Uploaded dump ${next.Name}`);
-      return ok({ Success: true, Message: null, Id: id });
-    },
-  },
-  {
-    method: "PUT",
-    pattern: /^\/update-dump$/,
-    handle: ({ body }) => {
-      const req = body as UpdateDumpRequest;
-      const idx = demoStore.dumps.findIndex((d) => d.Id === req.Id);
-      if (idx === -1) return notFound(`Dump ${req.Id} not found`);
-      const current = demoStore.dumps[idx];
-      demoStore.dumps[idx] = {
-        ...current,
-        Name: req.Name ?? current.Name,
-        Description: req.Description ?? current.Description,
-        FilePath: req.FilePath ?? current.FilePath,
-        LastModifiedDateTimeUtc: new Date().toISOString(),
-      };
-      demoStore.recordAdminEvent(`Updated dump ${demoStore.dumps[idx].Name}`);
-      return ok({ Success: true, Message: null });
-    },
-  },
-  {
-    method: "DELETE",
-    pattern: /^\/delete-dump\/(\d+)$/,
-    paramNames: ["id"],
-    handle: ({ params }) => {
-      const id = Number(params.id);
-      const idx = demoStore.dumps.findIndex((d) => d.Id === id);
-      if (idx === -1) return notFound(`Dump ${id} not found`);
-      const removed = demoStore.dumps.splice(idx, 1)[0];
-      demoStore.recordAdminEvent(`Deleted dump ${removed.Name}`);
-      return ok({ Success: true, Message: null });
-    },
-  },
-  {
-    method: "POST",
-    pattern: /^\/import-dump$/,
-    handle: ({ body }) => {
-      const req = body as ImportDumpRequest;
-      demoStore.recordAdminEvent(
-        `Imported dump ${req.DumpId} into database ${req.TargetDatabaseId}`,
-        req.Replace ? "Replace mode (drop & recreate)" : "Append mode",
-      );
-      return ok({
-        Success: true,
-        Message: null,
-        JobId: `demo-job-${Date.now().toString(36)}`,
-      });
     },
   },
 

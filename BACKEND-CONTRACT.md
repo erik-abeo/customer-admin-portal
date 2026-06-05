@@ -85,28 +85,6 @@ without changing names / DTOs is enough to ship the corresponding UI.
 The SPA's `useDelete*` mutations live in `src/features/*/queries.ts` and
 already invalidate the relevant list queries on success.
 
-### 2.2 Dumps (gated by `VITE_FEATURE_DUMPS`)
-
-DTOs: see `DumpInfoItem`, `GetAllDumpsResponse`, `CreateDumpRequest`,
-`CreateDumpResponse`, `UpdateDumpRequest`, `UpdateDumpResponse`,
-`ImportDumpRequest`, `ImportDumpResponse` in `src/api/types.ts`.
-
-| Method | URL                    | Body / Params                                                                                                                                                                                                                                       | Response               |
-| ------ | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| GET    | `/My/get-all-dumps`    | Query: `?databaseServerId=<int>&databaseId=<int>` (both optional, AND-combined).                                                                                                                                                                    | `GetAllDumpsResponse`  |
-| POST   | `/My/create-dump`      | `CreateDumpRequest` — registers an existing dump file already present on disk at `FilePath`.                                                                                                                                                        | `CreateDumpResponse`   |
-| PUT    | `/My/update-dump`      | `UpdateDumpRequest` — partial; only patch fields supplied.                                                                                                                                                                                          | `UpdateDumpResponse`   |
-| DELETE | `/My/delete-dump/{id}` | Should also delete the underlying file if owned by the service. Provide `?keepFile=true` to detach metadata only.                                                                                                                                   | `{ Success, Message }` |
-| POST   | `/My/import-dump`      | `ImportDumpRequest` — runs the dump against the target database. When `Replace=true`, drop & recreate before import. `JobId` in the response should be a stable, opaque identifier for future status polling (`/My/dump-jobs/{JobId}` is reserved). | `ImportDumpResponse`   |
-| POST   | `/My/upload-dump`      | `multipart/form-data` with fields `file` (required), `databaseServerId` (int, required), `databaseId` (int, required), `description` (string, optional). Server stores the file and creates the metadata row in one transaction.                    | `CreateDumpResponse`   |
-
-Notes:
-
-- `SizeBytes` may be `null` in `DumpInfoItem` when the file is missing or
-  inaccessible — the UI renders "—" in that case.
-- `CreatedDateTimeUtc` and `LastModifiedDateTimeUtc` are ISO-8601 UTC
-  strings (e.g. `"2026-04-21T18:43:02Z"`).
-
 ### 2.3 Event log (gated by `VITE_FEATURE_EVENT_LOG`)
 
 DTOs: see `EventLogEntry`, `EventLogQueryParams`, `EventLogQueryResponse`

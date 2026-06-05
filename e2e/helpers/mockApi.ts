@@ -13,27 +13,6 @@ export interface MockApiOptions {
   baseUrl?: string;
   /** When true, list endpoints return [] (used to test empty states). */
   empty?: boolean;
-  /** Custom dumps to seed the /get-all-dumps response. */
-  dumps?: DumpInfoFixture[];
-  /** Hook fired when /upload-dump is hit; lets the test capture the request body. */
-  onUploadDump?: (request: UploadDumpCapture) => void;
-}
-
-export interface DumpInfoFixture {
-  Id: number;
-  DatabaseServerId: number;
-  DatabaseId: number;
-  FileName: string;
-  Description: string | null;
-  SizeBytes: number | null;
-  CreatedDateTimeUtc: string;
-  LastModifiedDateTimeUtc: string | null;
-}
-
-export interface UploadDumpCapture {
-  contentType: string | null;
-  /** Multipart bodies are heavy; we only surface the size + the field count. */
-  bodyBytes: number;
 }
 
 const DEFAULT_BASE = "http://api.test";
@@ -58,7 +37,6 @@ export async function installApiMocks(
   const databases = empty ? [] : sampleDatabases;
   const users = empty ? [] : sampleUsers;
   const staticUsers = empty ? [] : sampleStaticUsers;
-  const dumps = empty ? [] : (opts.dumps ?? []);
 
   const routes: RouteSpec[] = [
     {
@@ -95,11 +73,6 @@ export async function installApiMocks(
       method: "GET",
       path: "/get-all-static-database-users",
       body: staticUsers,
-    },
-    {
-      method: "GET",
-      path: "/get-all-dumps",
-      body: { Success: true, Message: null, Dumps: dumps },
     },
     // Event log shape — empty page is enough to keep the page from
     // showing an error state while exercising the surrounding UI.
@@ -156,24 +129,6 @@ export async function installApiMocks(
         });
         return;
       }
-    }
-
-    // Dynamic upload-dump handler — captures the multipart request and
-    // returns the contract-spec response (CreateDumpResponse-shaped:
-    // Success/Message/Id) so the UI's success path runs.
-    if (method === "POST" && path === "/upload-dump") {
-      const headers = request.headers();
-      const body = request.postDataBuffer();
-      opts.onUploadDump?.({
-        contentType: headers["content-type"] ?? null,
-        bodyBytes: body?.length ?? 0,
-      });
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ Success: true, Message: null, Id: 9999 }),
-      });
-      return;
     }
 
     for (const spec of routes) {

@@ -7,7 +7,7 @@
  * to the seed — exactly the behavior we want for demos:
  *
  *   - Show up, log in, the seed dataset is there.
- *   - Add a server, edit a user, delete a dump → state reflects it
+ *   - Add a server, edit a user, delete a static user → state reflects it
  *     immediately and survives navigation.
  *   - Reload the tab → fresh seed, ready for another walkthrough.
  *
@@ -20,7 +20,6 @@ import type {
   DatabaseInfoItem,
   DatabasePrivilegeInfo,
   DatabaseServerInfoItem,
-  DumpInfoItem,
   EventLogEntry,
   GetStaticDatabaseUserResponse,
 } from "@/api/types";
@@ -28,7 +27,6 @@ import type {
 import {
   seedAuthorizedUsers,
   seedDatabases,
-  seedDumps,
   seedEventLog,
   seedServers,
   seedStaticUserPrivileges,
@@ -63,7 +61,6 @@ class DemoStore {
   staticUserPrivileges: Record<number, DatabasePrivilegeInfo[]> = clone(
     seedStaticUserPrivileges,
   );
-  dumps: DumpInfoItem[] = clone(seedDumps);
   eventLog: EventLogEntry[] = clone(seedEventLog);
 
   // ID sequences seeded above the highest fixture id so freshly-created
@@ -72,7 +69,6 @@ class DemoStore {
   databaseIds: IdSequence = makeIdSequence(200);
   authorizedUserIds: IdSequence = makeIdSequence(2000);
   staticUserIds: IdSequence = makeIdSequence(100);
-  dumpIds: IdSequence = makeIdSequence(6000);
   eventLogIds: IdSequence = makeIdSequence(10_000);
 
   /** Add a synthetic event-log entry whenever the demo performs a write. */

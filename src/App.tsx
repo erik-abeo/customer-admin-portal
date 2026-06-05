@@ -62,9 +62,6 @@ const DatabaseServersPage = lazy(() =>
 const DatabasesPage = lazy(() =>
   import("@/pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })),
 );
-const DumpsPage = lazy(() =>
-  import("@/pages/DumpsPage").then((m) => ({ default: m.DumpsPage })),
-);
 const EventLogPage = lazy(() =>
   import("@/pages/EventLogPage").then((m) => ({ default: m.EventLogPage })),
 );
@@ -142,7 +139,6 @@ const router = createBrowserRouter(
         { path: "/databases/:databaseId", element: <DatabaseDetailPage /> },
         { path: "/authorized-users", element: <AuthorizedUsersPage /> },
         { path: "/static-users", element: <StaticUsersPage /> },
-        { path: "/dumps", element: <DumpsPage /> },
         { path: "/event-log", element: <EventLogPage /> },
         { path: "*", element: <NotFoundPage /> },
       ],

@@ -27,7 +27,6 @@ import {
   IconDashboard,
   IconDatabase,
   IconDeviceLaptop,
-  IconFileDatabase,
   IconKey,
   IconList,
   IconLogout,
@@ -60,7 +59,6 @@ const NAV_ITEMS = [
   { to: "/databases", label: "Databases", icon: IconDatabase },
   { to: "/authorized-users", label: "Authorized users", icon: IconUsers },
   { to: "/static-users", label: "Static DB users", icon: IconKey },
-  { to: "/dumps", label: "Dumps", icon: IconFileDatabase },
   { to: "/event-log", label: "Event log", icon: IconList },
 ] as const;
 
