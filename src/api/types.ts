@@ -126,6 +126,96 @@ export interface ProbeDatabaseServerResponse {
   Checks: DatabaseServerProbeCheck[];
 }
 
+// ---------- Customer moves ----------
+
+/**
+ * `planned` -> `quiescing` -> `draining` -> `copying` -> `verifying` ->
+ * `flipped` -> `settled`, plus `failed` and `rolled_back`.
+ *
+ * `flipped` means the customer is on the target and the source is retained.
+ * `settled` means the source has been dropped, which is the point of no return.
+ */
+export type CustomerMoveStatus =
+  | "planned"
+  | "quiescing"
+  | "draining"
+  | "copying"
+  | "verifying"
+  | "flipped"
+  | "settled"
+  | "failed"
+  | "rolled_back";
+
+export interface CustomerMove {
+  Id: number;
+  DatabaseId: number;
+  CrystalPmId: number;
+  SourceDatabaseServerId: number;
+  SourceDatabaseServerName: string | null;
+  TargetDatabaseServerId: number;
+  TargetDatabaseServerName: string | null;
+  TargetDatabaseName: string | null;
+  SourceDatabaseName: string | null;
+  Status: CustomerMoveStatus | string;
+  /** What the current phase is doing, in the operator's terms. */
+  PhaseDetail: string | null;
+  RequestedByAdmin: string | null;
+  CreatedDateTimeUtc: string;
+  QuiescedDateTimeUtc: string | null;
+  CopyStartedDateTimeUtc: string | null;
+  CopyCompletedDateTimeUtc: string | null;
+  VerifiedDateTimeUtc: string | null;
+  FlippedDateTimeUtc: string | null;
+  SourceRetiredDateTimeUtc: string | null;
+  /** Once set, the move can no longer be rolled back. */
+  SourceDroppedDateTimeUtc: string | null;
+  ErrorMessage: string | null;
+}
+
+export interface CustomerMoveVerification {
+  Id: number;
+  CustomerMoveId: number;
+  TableName: string | null;
+  SourceRowCount: number | null;
+  TargetRowCount: number | null;
+  SourceChecksum: number | null;
+  TargetChecksum: number | null;
+  /**
+   * `checksum` or `row_count`. Not equivalent: matching row counts say nothing
+   * about the values in them. Show which one a move actually got.
+   */
+  VerificationMethod: string | null;
+  Matched: boolean;
+  CheckedDateTimeUtc: string;
+}
+
+export interface CreateCustomerMoveRequest {
+  DatabaseId: number;
+  TargetDatabaseServerId: number;
+  /** Defaults to the source's name when omitted. */
+  TargetDatabaseName: string | null;
+  RequestedByAdmin: string | null;
+}
+
+export interface CustomerMoveResult {
+  Success: boolean;
+  Message: string | null;
+  MoveId: number;
+}
+
+export interface GetCustomerMovesResponse {
+  Success: boolean;
+  Message: string | null;
+  Moves: CustomerMove[];
+}
+
+export interface GetCustomerMoveResponse {
+  Success: boolean;
+  Message: string | null;
+  Move: CustomerMove | null;
+  Verification: CustomerMoveVerification[];
+}
+
 // ---------- Server capacity and placement ----------
 
 /** Headroom, NearCapacity, Full or Unreachable. */

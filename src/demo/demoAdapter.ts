@@ -36,6 +36,8 @@ import type {
   GetMigrationSessionResponse,
   GetMigrationSessionsResponse,
   MigrationSessionItem,
+  CustomerMove,
+  GetCustomerMovesResponse,
   GetFleetCapacityResponse,
   ServerCapacity,
   ProbeDatabaseServerRequest,
@@ -136,6 +138,99 @@ const ROUTES: Route[] = [
       const found = demoStore.servers.find((s) => s.Id === id);
       if (!found) return notFound(`Database server ${id} not found`);
       return ok(found);
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/get-customer-moves$/,
+    handle: () =>
+      ok<GetCustomerMovesResponse>({ Success: true, Message: null, Moves: demoStore.customerMoves }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/get-customer-move\/(\d+)$/,
+    handle: ({ params }) => {
+      const id = Number(params[0]);
+      const move = demoStore.customerMoves.find((m) => m.Id === id);
+      if (!move) return notFound(`Move ${id} not found`);
+      return ok({
+        Success: true,
+        Message: null,
+        Move: move,
+        Verification: demoStore.customerMoveVerification[id] ?? [],
+      });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/create-customer-move$/,
+    handle: ({ body }) => {
+      const req = body as {
+        DatabaseId: number;
+        TargetDatabaseServerId: number;
+        TargetDatabaseName: string | null;
+      };
+      const database = demoStore.databases.find((d) => d.Id === req.DatabaseId);
+      if (!database) return ok({ Success: false, Message: "That database does not exist.", MoveId: 0 });
+
+      const source = demoStore.servers.find((s) => s.Id === database.DatabaseServerId);
+      const target = demoStore.servers.find((s) => s.Id === req.TargetDatabaseServerId);
+      const id = demoStore.customerMoveIds.next();
+
+      const move: CustomerMove = {
+        Id: id,
+        DatabaseId: database.Id,
+        CrystalPmId: database.CrystalPmId,
+        SourceDatabaseServerId: database.DatabaseServerId,
+        SourceDatabaseServerName: source?.Name ?? null,
+        TargetDatabaseServerId: req.TargetDatabaseServerId,
+        TargetDatabaseServerName: target?.Name ?? null,
+        TargetDatabaseName: req.TargetDatabaseName ?? database.DatabaseName,
+        SourceDatabaseName: database.DatabaseName,
+        Status: "planned",
+        PhaseDetail: "Waiting for open sessions to end.",
+        RequestedByAdmin: "demo.admin",
+        CreatedDateTimeUtc: new Date().toISOString(),
+        QuiescedDateTimeUtc: null,
+        CopyStartedDateTimeUtc: null,
+        CopyCompletedDateTimeUtc: null,
+        VerifiedDateTimeUtc: null,
+        FlippedDateTimeUtc: null,
+        SourceRetiredDateTimeUtc: null,
+        SourceDroppedDateTimeUtc: null,
+        ErrorMessage: null,
+      };
+      demoStore.customerMoves = [move, ...demoStore.customerMoves];
+      return ok({ Success: true, MoveId: id, Message: "Move planned. The customer stays online until the copy is ready to begin." });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/roll-back-customer-move\/(\d+)$/,
+    handle: ({ params }) => {
+      const move = demoStore.customerMoves.find((m) => m.Id === Number(params[0]));
+      if (!move) return notFound("Move not found");
+      if (move.Status !== "flipped") {
+        return ok({ Success: false, Message: `This move is ${move.Status}. Only a move that has cut over can be rolled back.`, MoveId: move.Id });
+      }
+      move.Status = "rolled_back";
+      move.PhaseDetail = "Pointed back at the source. The target copy is left in place.";
+      return ok({ Success: true, MoveId: move.Id, Message: "Pointed back at the source." });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/drop-customer-move-source\/(\d+)$/,
+    handle: ({ params }) => {
+      const move = demoStore.customerMoves.find((m) => m.Id === Number(params[0]));
+      if (!move) return notFound("Move not found");
+      if (move.Status !== "flipped") {
+        return ok({ Success: false, Message: `This move is ${move.Status}. Only a move that cut over cleanly has a source to retire.`, MoveId: move.Id });
+      }
+      move.Status = "settled";
+      move.SourceDroppedDateTimeUtc = new Date().toISOString();
+      move.PhaseDetail = "Source dropped. This move can no longer be rolled back.";
+      return ok({ Success: true, MoveId: move.Id, Message: `Dropped '${move.SourceDatabaseName}'.` });
     },
   },
   {

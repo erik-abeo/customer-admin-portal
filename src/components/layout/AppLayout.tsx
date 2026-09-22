@@ -34,6 +34,7 @@ import {
   IconSearch,
   IconServer2,
   IconChartBar,
+  IconExchange,
   IconSun,
   IconTransfer,
   IconUsers,
@@ -61,6 +62,7 @@ const NAV_ITEMS = [
     ? ([
         { to: "/migrations", label: "Migrations", icon: IconTransfer },
         { to: "/capacity", label: "Capacity", icon: IconChartBar },
+        { to: "/moves", label: "Customer moves", icon: IconExchange },
       ] as const)
     : ([] as const)),
   { to: "/database-servers", label: "Database servers", icon: IconServer2 },

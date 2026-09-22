@@ -192,7 +192,44 @@ A background collector writes these into `server_metrics_snapshot` hourly and
 keeps 400 days, so trend is available later even though no endpoint serves it
 yet.
 
-### 1.5 Migration sessions
+### 1.5 Customer moves
+
+Moving a customer's database from one server to another.
+
+| Method | URL | Request | Response |
+| ------ | --- | ------- | -------- |
+| POST | `/My/create-customer-move` | `CreateCustomerMoveRequest` | `CustomerMoveResult` |
+| GET | `/My/get-customer-moves` | — | `GetCustomerMovesResponse` |
+| GET | `/My/get-customer-move/{id}` | — | `GetCustomerMoveResponse` |
+| POST | `/My/roll-back-customer-move/{id}` | — | `CustomerMoveResult` |
+| POST | `/My/drop-customer-move-source/{id}` | — | `CustomerMoveResult` |
+
+These record intent. The work runs in a background executor, so the portal plans
+a move and then watches it: `planned` to `quiescing` to `draining` to `copying`
+to `verifying` to `flipped`, plus `failed` and `rolled_back`, and `settled` once
+the source is dropped.
+
+**The customer is offline during `quiescing`, `draining`, `copying` and
+`verifying`.** Surface that in the list, not only in a detail view. A move in
+`copying` means a practice cannot open CrystalPM, and whoever is looking at the
+page should not have to click to find that out.
+
+`flipped` means cut over **with the source retained**. Rolling back is a single
+row update while that is true, which is why dropping the source is a separate
+action and the only irreversible one. Offer `roll-back` and `drop-source` only
+for `flipped` with `SourceDroppedDateTimeUtc` null.
+
+`Verification` on the detail response is per table and carries
+`VerificationMethod`, either `checksum` or `row_count`. **These are not
+equivalent** and the UI should say which one a move got: matching row counts say
+nothing about the values in them. Checksums are only comparable within one
+engine, so a MySQL-to-MariaDB move falls back to counts. A mismatch fails the
+move before anything cuts over.
+
+Planning is refused for a customer that already has a move in flight, and for a
+target server the customer is already on.
+
+### 1.6 Migration sessions
 
 The streaming-migration flow. The portal mints a key for one customer's move and
 shows it once; the operator pastes it into the MariaDB installer, which redeems

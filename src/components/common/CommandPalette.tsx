@@ -10,6 +10,7 @@ import {
   IconSearch,
   IconServer2,
   IconChartBar,
+  IconExchange,
   IconSun,
   IconTransfer,
   IconUsers,
@@ -102,6 +103,14 @@ export function CommandPalette() {
               keywords: ["placement", "capacity", "servers", "headroom", "size"],
               leftSection: <IconChartBar size={18} stroke={1.7} />,
               onClick: () => navigate("/capacity"),
+            },
+            {
+              id: "nav-moves",
+              label: "Customer moves",
+              description: "Move a customer's database to another server",
+              keywords: ["move", "rebalance", "relocate", "transfer", "server"],
+              leftSection: <IconExchange size={18} stroke={1.7} />,
+              onClick: () => navigate("/moves"),
             },
           ]
         : []),
