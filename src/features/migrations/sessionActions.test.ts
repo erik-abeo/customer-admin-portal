@@ -52,8 +52,8 @@ describe("canDiscardTarget", () => {
   });
 
   it("does not offer anything while the migration could still succeed, or after it did", () => {
-    for (const Status of ["pending", "redeemed", "streaming", "completed", null]) {
-      expect(canDiscardTarget(session({ Status }))).toBe(false);
+    for (const status of ["pending", "redeemed", "streaming", "completed", null]) {
+      expect(canDiscardTarget(session({ Status: status }))).toBe(false);
     }
   });
 });
