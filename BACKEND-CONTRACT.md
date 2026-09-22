@@ -11,8 +11,17 @@ ASP.NET service. It covers:
    meant to be implemented exactly as specified so the UI lights up
    without further frontend changes.
 
-All requests / responses use `application/json` with default
-`System.Text.Json` serialization (PascalCase property names).
+All requests and responses use `application/json` with **PascalCase** property
+names.
+
+That is configured, not the default. `AddControllers()` on its own uses
+`JsonSerializerDefaults.Web`, whose naming policy is camelCase, and the service
+did exactly that until it was corrected: responses went out as
+`{"success":...}` while every DTO here read `Success`. Nothing in the SPA
+transforms casing, so the symptom was empty pages rather than an error. If
+anyone ever removes the `AddJsonOptions` call in `Program.cs`, this document and
+the SPA both become wrong at once and silently. Request binding is
+case-insensitive, so callers sending camelCase bodies still work.
 
 Authentication: every endpoint accepts the static `api-key` request
 header (interim mechanism, validated server-side against
