@@ -34,6 +34,7 @@ import {
   IconSearch,
   IconServer2,
   IconSun,
+  IconTransfer,
   IconUsers,
 } from "@tabler/icons-react";
 import { Suspense } from "react";
@@ -55,6 +56,9 @@ const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.1
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: IconDashboard },
+  ...(features.migrations
+    ? ([{ to: "/migrations", label: "Migrations", icon: IconTransfer }] as const)
+    : ([] as const)),
   { to: "/database-servers", label: "Database servers", icon: IconServer2 },
   { to: "/databases", label: "Databases", icon: IconDatabase },
   { to: "/authorized-users", label: "Authorized users", icon: IconUsers },

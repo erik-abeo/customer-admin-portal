@@ -16,6 +16,8 @@
  * pay any cost for it (Vite tree-shakes the unreachable import).
  */
 import type {
+  MigrationSessionItem,
+  MigrationSessionProgressItem,
   AuthorizedUserInfoItem,
   DatabaseInfoItem,
   DatabasePrivilegeInfo,
@@ -28,6 +30,8 @@ import {
   seedAuthorizedUsers,
   seedDatabases,
   seedEventLog,
+  seedMigrationProgress,
+  seedMigrationSessions,
   seedServers,
   seedStaticUserPrivileges,
   seedStaticUsers,
@@ -62,6 +66,9 @@ class DemoStore {
     seedStaticUserPrivileges,
   );
   eventLog: EventLogEntry[] = clone(seedEventLog);
+  migrationSessions: MigrationSessionItem[] = clone(seedMigrationSessions);
+  migrationProgress: Record<number, MigrationSessionProgressItem[]> =
+    clone(seedMigrationProgress);
 
   // ID sequences seeded above the highest fixture id so freshly-created
   // records never collide with the seed.
@@ -70,6 +77,7 @@ class DemoStore {
   authorizedUserIds: IdSequence = makeIdSequence(2000);
   staticUserIds: IdSequence = makeIdSequence(100);
   eventLogIds: IdSequence = makeIdSequence(10_000);
+  migrationSessionIds: IdSequence = makeIdSequence(600);
 
   /** Add a synthetic event-log entry whenever the demo performs a write. */
   recordAdminEvent(message: string, details: string | null = null): void {

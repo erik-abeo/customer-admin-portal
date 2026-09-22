@@ -10,8 +10,11 @@ import {
   IconSearch,
   IconServer2,
   IconSun,
+  IconTransfer,
   IconUsers,
 } from "@tabler/icons-react";
+
+import { features } from "@/config/env";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -81,6 +84,18 @@ export function CommandPalette() {
         leftSection: <IconList size={18} stroke={1.7} />,
         onClick: () => navigate("/event-log"),
       },
+      ...(features.migrations
+        ? [
+            {
+              id: "nav-migrations",
+              label: "Migrations",
+              description: "Mint a key to move a customer onto a remote database",
+              keywords: ["migrate", "move", "key", "stream", "onboarding"],
+              leftSection: <IconTransfer size={18} stroke={1.7} />,
+              onClick: () => navigate("/migrations"),
+            },
+          ]
+        : []),
       {
         id: "toggle-theme",
         label: isDark ? "Switch to light mode" : "Switch to dark mode",

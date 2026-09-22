@@ -126,6 +126,105 @@ export interface ProbeDatabaseServerResponse {
   Checks: DatabaseServerProbeCheck[];
 }
 
+// ---------- Migration sessions ----------
+
+/**
+ * Mints a migration key for one customer's move.
+ *
+ * Supply exactly one of `DatabaseId` (an existing database) or `DatabaseName`
+ * (one to provision). Both or neither is a 400: the two readings do different
+ * things to a customer's data, so the backend will not guess.
+ */
+export interface CreateMigrationSessionRequest {
+  DatabaseServerId: number;
+  DatabaseId: number | null;
+  DatabaseName: string | null;
+  CrystalPmId: number;
+  CreatedByAdmin: string | null;
+  /** Clamped to 5..1440 server-side. Defaults to 120. */
+  ExpiresInMinutes: number | null;
+}
+
+export interface CreateMigrationSessionResponse {
+  Success: boolean;
+  Message: string | null;
+  SessionId: number;
+  /**
+   * Shown once and never retrievable: only its hash is stored. Losing it means
+   * revoking this session and minting another.
+   */
+  MigrationKey: string | null;
+  /** Leading group of the key, safe to show in a list afterwards. */
+  MigrationKeyPrefix: string | null;
+  ExpiresUtc: string;
+  /**
+   * The destination in words, for the confirmation step. Appends a warning when
+   * the customer already has a database on a different server.
+   */
+  TargetSummary: string | null;
+}
+
+/** `pending` → `redeemed` → `streaming` → `completed` | `failed`, plus `expired` and `revoked`. */
+export type MigrationSessionStatus =
+  | "pending"
+  | "redeemed"
+  | "streaming"
+  | "completed"
+  | "failed"
+  | "expired"
+  | "revoked";
+
+export interface MigrationSessionItem {
+  Id: number;
+  MigrationKeyPrefix: string | null;
+  DatabaseServerId: number;
+  DatabaseServerName: string | null;
+  DatabaseId: number | null;
+  DatabaseName: string | null;
+  /** Schema name still to be created, for a key minted against a new database. */
+  ProvisionDatabaseName: string | null;
+  CrystalPmId: number;
+  Status: MigrationSessionStatus | string;
+  Phase: string | null;
+  CreatedByAdmin: string | null;
+  CreatedDateTimeUtc: string;
+  ExpiresDateTimeUtc: string;
+  RedeemedDateTimeUtc: string | null;
+  CompletedDateTimeUtc: string | null;
+  ClientPublicIp: string | null;
+  ClientMachineId: string | null;
+  MigrationUserName: string | null;
+  MigrationUserHost: string | null;
+  LastHeartbeatUtc: string | null;
+  ErrorMessage: string | null;
+}
+
+export interface MigrationSessionProgressItem {
+  Id: number;
+  UtcTimestamp: string;
+  Phase: string | null;
+  TableName: string | null;
+  RowsDone: number | null;
+  RowsTotal: number | null;
+  BytesDone: number | null;
+  Message: string | null;
+  IsError: boolean;
+}
+
+export interface GetMigrationSessionsResponse {
+  Success: boolean;
+  Message: string | null;
+  Sessions: MigrationSessionItem[];
+}
+
+export interface GetMigrationSessionResponse {
+  Success: boolean;
+  Message: string | null;
+  Session: MigrationSessionItem | null;
+  /** Oldest first. A migration that died partway says where it got to. */
+  Progress: MigrationSessionProgressItem[];
+}
+
 // ---------- Databases ----------
 
 export interface DatabaseInfoItem {

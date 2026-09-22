@@ -65,6 +65,9 @@ const DatabasesPage = lazy(() =>
 const EventLogPage = lazy(() =>
   import("@/pages/EventLogPage").then((m) => ({ default: m.EventLogPage })),
 );
+const MigrationsPage = lazy(() =>
+  import("@/pages/MigrationsPage").then((m) => ({ default: m.MigrationsPage })),
+);
 const LoginPage = lazy(() =>
   import("@/pages/LoginPage").then((m) => ({ default: m.LoginPage })),
 );
@@ -140,6 +143,7 @@ const router = createBrowserRouter(
         { path: "/authorized-users", element: <AuthorizedUsersPage /> },
         { path: "/static-users", element: <StaticUsersPage /> },
         { path: "/event-log", element: <EventLogPage /> },
+        { path: "/migrations", element: <MigrationsPage /> },
         { path: "*", element: <NotFoundPage /> },
       ],
     },

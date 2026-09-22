@@ -58,6 +58,13 @@ export const features = {
   rbac: bool(import.meta.env.VITE_FEATURE_RBAC),
   /** When true, an outbound audit-log POST is emitted for every write. */
   auditSink: bool(import.meta.env.VITE_FEATURE_AUDIT_SINK),
+  /**
+   * Streaming migrations: minting the keys that move a customer onto a remote
+   * database. Off by default, because a key authorises an overwrite of a
+   * customer's records and the page should not appear before somebody has
+   * decided it should.
+   */
+  migrations: bool(import.meta.env.VITE_FEATURE_MIGRATIONS),
 } as const;
 
 export const env = {

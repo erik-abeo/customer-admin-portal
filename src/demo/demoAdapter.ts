@@ -31,6 +31,11 @@ import type {
   AuthorizedUserInfoItem,
   CreateDatabaseInfoRequest,
   CreateDatabaseServerInfoRequest,
+  CreateMigrationSessionRequest,
+  CreateMigrationSessionResponse,
+  GetMigrationSessionResponse,
+  GetMigrationSessionsResponse,
+  MigrationSessionItem,
   ProbeDatabaseServerRequest,
   ProbeDatabaseServerResponse,
   CreateStaticDatabaseUserRequest,
@@ -129,6 +134,113 @@ const ROUTES: Route[] = [
       const found = demoStore.servers.find((s) => s.Id === id);
       if (!found) return notFound(`Database server ${id} not found`);
       return ok(found);
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/get-migration-sessions$/,
+    handle: () =>
+      ok<GetMigrationSessionsResponse>({
+        Success: true,
+        Message: null,
+        Sessions: demoStore.migrationSessions,
+      }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/get-migration-session\/(\d+)$/,
+    handle: ({ params }) => {
+      const id = Number(params[0]);
+      const session = demoStore.migrationSessions.find((m) => m.Id === id);
+      if (!session) return notFound(`Migration session ${id} not found`);
+      return ok<GetMigrationSessionResponse>({
+        Success: true,
+        Message: null,
+        Session: session,
+        Progress: demoStore.migrationProgress[id] ?? [],
+      });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/create-migration-session$/,
+    handle: ({ body }) => {
+      const req = body as CreateMigrationSessionRequest;
+      const id = demoStore.migrationSessionIds.next();
+      const server = demoStore.servers.find((s) => s.Id === req.DatabaseServerId);
+      const database = demoStore.databases.find((d) => d.Id === req.DatabaseId);
+      const expires = new Date(
+        Date.now() + (req.ExpiresInMinutes ?? 120) * 60_000,
+      ).toISOString();
+
+      // A fixed key in demo mode. It is not a secret here and a stable value is
+      // easier to talk about when showing somebody the reveal-once modal.
+      const key = "CPM-DEMO-KEY1-0000";
+
+      const session: MigrationSessionItem = {
+        Id: id,
+        MigrationKeyPrefix: "DEMO",
+        DatabaseServerId: req.DatabaseServerId,
+        DatabaseServerName: server?.Name ?? null,
+        DatabaseId: req.DatabaseId,
+        DatabaseName: database?.DatabaseName ?? null,
+        ProvisionDatabaseName: req.DatabaseName,
+        CrystalPmId: req.CrystalPmId,
+        Status: "pending",
+        Phase: null,
+        CreatedByAdmin: req.CreatedByAdmin,
+        CreatedDateTimeUtc: new Date().toISOString(),
+        ExpiresDateTimeUtc: expires,
+        RedeemedDateTimeUtc: null,
+        CompletedDateTimeUtc: null,
+        ClientPublicIp: null,
+        ClientMachineId: null,
+        MigrationUserName: null,
+        MigrationUserHost: null,
+        LastHeartbeatUtc: null,
+        ErrorMessage: null,
+      };
+      demoStore.migrationSessions = [session, ...demoStore.migrationSessions];
+
+      const elsewhere = demoStore.databases.filter(
+        (d) => d.CrystalPmId === req.CrystalPmId && d.DatabaseServerId !== req.DatabaseServerId,
+      );
+      const target =
+        database?.DatabaseName ?? req.DatabaseName ?? "the selected database";
+
+      return ok<CreateMigrationSessionResponse>({
+        Success: true,
+        Message: "Migration key created. It is shown once and cannot be retrieved again.",
+        SessionId: id,
+        MigrationKey: key,
+        MigrationKeyPrefix: "DEMO",
+        ExpiresUtc: expires,
+        TargetSummary:
+          `Customer ${req.CrystalPmId} into '${target}' on server ${req.DatabaseServerId}.` +
+          (elsewhere.length > 0
+            ? ` Note: this customer already has a database on server ${[
+                ...new Set(elsewhere.map((d) => d.DatabaseServerId)),
+              ].join(", ")}.`
+            : ""),
+      });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/revoke-migration-session\/(\d+)$/,
+    handle: ({ params }) => {
+      const id = Number(params[0]);
+      const session = demoStore.migrationSessions.find((m) => m.Id === id);
+      if (!session) return notFound(`Migration session ${id} not found`);
+      if (!["pending", "redeemed", "streaming"].includes(session.Status)) {
+        return ok({
+          Success: false,
+          Message: `This session is already ${session.Status} and cannot be revoked.`,
+        });
+      }
+      session.Status = "revoked";
+      session.CompletedDateTimeUtc = new Date().toISOString();
+      return ok({ Success: true, Message: "Migration key revoked." });
     },
   },
   {
