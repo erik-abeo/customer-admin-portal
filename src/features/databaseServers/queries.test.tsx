@@ -15,8 +15,15 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { databaseServersApi } from "@/api/databaseServers";
-import type { DatabaseServerInfoItem } from "@/api/types";
-import { databaseServerKeys, useDatabaseServer } from "./queries";
+import type {
+  DatabaseServerInfoItem,
+  ProbeDatabaseServerResponse,
+} from "@/api/types";
+import {
+  databaseServerKeys,
+  useDatabaseServer,
+  useProbeDatabaseServer,
+} from "./queries";
 
 vi.mock("@/api/databaseServers", () => ({
   databaseServersApi: {
@@ -25,6 +32,7 @@ vi.mock("@/api/databaseServers", () => ({
     create: vi.fn(),
     update: vi.fn(),
     remove: vi.fn(),
+    probe: vi.fn(),
   },
 }));
 
@@ -35,8 +43,10 @@ const sampleItem: DatabaseServerInfoItem = {
   LocalServerAddress: "10.0.1.10",
   RemoteServerAddress: "db-east.crystalpm.internal",
   ServerPort: 3306,
+  AdminUserName: "cpmadmin",
   RootUserPassword: "•••",
   Certificate: null,
+  SecurityGroupId: null,
 };
 
 function makeWrapper(client: QueryClient) {
@@ -116,5 +126,51 @@ describe("useDatabaseServer", () => {
       expect(result.current.fetchStatus).toBe("idle");
     });
     expect(databaseServersApi.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("useProbeDatabaseServer", () => {
+  const unsupported: ProbeDatabaseServerResponse = {
+    Success: true,
+    Message: "This server cannot be registered: MySql 5.7 is below the supported minimum.",
+    Engine: "MySql",
+    EngineVersion: "5.7.44",
+    RawVersion: "5.7.44",
+    MeetsMinimumVersion: false,
+    TlsInUse: true,
+    CanCreateDatabase: true,
+    CanCreateUser: true,
+    IsSupported: false,
+    Checks: [
+      { Name: "connect", Passed: true, Detail: "Connected to db.example:3306." },
+      { Name: "version", Passed: false, Detail: "MySql 5.7.44 is below the supported minimum of 8.0." },
+    ],
+  };
+
+  it("returns a reachable-but-unsupported server as data rather than an error", async () => {
+    // The distinction the UI depends on: an unusable server still answers 200,
+    // so the mutation resolves and the caller reads IsSupported. Treating this
+    // as a failure would lose the per-check detail that says why.
+    vi.mocked(databaseServersApi.probe).mockResolvedValue(unsupported);
+
+    const client = makeClient();
+    const { result } = renderHook(() => useProbeDatabaseServer(), {
+      wrapper: makeWrapper(client),
+    });
+
+    await result.current.mutateAsync({
+      Host: "db.example",
+      Port: "3306",
+      User: "cpmadmin",
+      Password: "secret",
+      SslMode: "Required",
+      CertificatePem: null,
+    });
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(result.current.data?.IsSupported).toBe(false);
+    expect(result.current.data?.Checks).toHaveLength(2);
   });
 });

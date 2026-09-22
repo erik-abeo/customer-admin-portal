@@ -1,6 +1,8 @@
 import { httpClient } from "./httpClient";
 import type {
   CreateDatabaseServerInfoRequest,
+  ProbeDatabaseServerRequest,
+  ProbeDatabaseServerResponse,
   CreateDatabaseServerInfoResponse,
   DatabaseServerInfoItem,
   GetAllDatabaseServerInfoResponse,
@@ -39,6 +41,23 @@ export const databaseServersApi = {
   ): Promise<UpdateDatabaseServerInfoResponse> {
     const { data } = await httpClient.put<UpdateDatabaseServerInfoResponse>(
       "/update-database-server-info",
+      request,
+    );
+    return data;
+  },
+
+  /**
+   * Connects to a candidate server and reports what it is, saving nothing.
+   *
+   * Read-only and safe to repeat. An unreachable or unsuitable server comes
+   * back as a 200 whose body says so, so callers should inspect `IsSupported`
+   * rather than relying on the request throwing.
+   */
+  async probe(
+    request: ProbeDatabaseServerRequest,
+  ): Promise<ProbeDatabaseServerResponse> {
+    const { data } = await httpClient.post<ProbeDatabaseServerResponse>(
+      "/probe-database-server",
       request,
     );
     return data;

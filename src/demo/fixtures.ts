@@ -37,8 +37,10 @@ export const seedServers: DatabaseServerInfoItem[] = [
     LocalServerAddress: "10.0.0.10",
     RemoteServerAddress: "remotedb-1.crystalpm.net",
     ServerPort: 3306,
+    AdminUserName: "cpmadmin",
     RootUserPassword: "demo-root-pw-1",
     Certificate: null,
+    SecurityGroupId: "sg-0demo10000demo1",
   },
   {
     Id: 2,
@@ -47,8 +49,10 @@ export const seedServers: DatabaseServerInfoItem[] = [
     LocalServerAddress: "10.0.0.11",
     RemoteServerAddress: "remotedb-2.crystalpm.net",
     ServerPort: 3306,
+    AdminUserName: "cpmadmin",
     RootUserPassword: "demo-root-pw-2",
     Certificate: null,
+    SecurityGroupId: "sg-0demo20000demo2",
   },
   {
     Id: 3,
@@ -57,8 +61,10 @@ export const seedServers: DatabaseServerInfoItem[] = [
     LocalServerAddress: "10.10.0.10",
     RemoteServerAddress: "remotedb-w1.crystalpm.net",
     ServerPort: 3306,
+    AdminUserName: "cpmadmin",
     RootUserPassword: "demo-root-pw-3",
     Certificate: null,
+    SecurityGroupId: "sg-0demo30000demo3",
   },
 ];
 

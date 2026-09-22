@@ -22,8 +22,21 @@ export interface DatabaseServerInfoItem {
   LocalServerAddress: string;
   RemoteServerAddress: string | null;
   ServerPort: number;
+  /**
+   * Administrative login for this server. Defaults to `root`, but must be
+   * settable: AWS RDS reserves that name and will not create a master user
+   * called it, so an RDS server is administered under whatever master username
+   * it was given.
+   */
+  AdminUserName: string;
+  /**
+   * Password for {@link AdminUserName}. Named for the era when that login was
+   * always `root`; the backend column has not been renamed.
+   */
   RootUserPassword: string;
   Certificate: string | null;
+  /** AWS security group whose ingress rules gate access to this server. */
+  SecurityGroupId: string | null;
 }
 
 export interface CreateDatabaseServerInfoRequest {
@@ -32,8 +45,10 @@ export interface CreateDatabaseServerInfoRequest {
   LocalServerAddress: string;
   RemoteServerAddress: string | null;
   ServerPort: number;
+  AdminUserName: string;
   RootUserPassword: string;
   Certificate: string | null;
+  SecurityGroupId: string | null;
 }
 
 export interface CreateDatabaseServerInfoResponse {
@@ -57,6 +72,59 @@ export interface GetAllDatabaseServerInfoResponse {
 // GetDatabaseServerInfo on the server returns the bare DatabaseServerInfoItem
 // shape (no envelope) — see GetDatabaseServerInfoResponse.cs.
 export type GetDatabaseServerInfoResponse = DatabaseServerInfoItem;
+
+// ---------- Database server probe ----------
+
+/**
+ * Asks the backend to connect to a candidate server and report what it is,
+ * without saving anything. Read-only and safe to repeat, so it can run while
+ * the operator is still editing the form.
+ */
+export interface ProbeDatabaseServerRequest {
+  Host: string;
+  /** Defaults to 3306 server-side when omitted. */
+  Port: string | null;
+  User: string;
+  /** Never persisted by the probe. */
+  Password: string;
+  /** Defaults to `Required` server-side when omitted. */
+  SslMode: string | null;
+  /** Optional CA, for `VerifyCA` / `VerifyFull`. */
+  CertificatePem: string | null;
+}
+
+/** One named pass/fail line from a probe, rendered as a checklist row. */
+export interface DatabaseServerProbeCheck {
+  /** Stable id, e.g. `connect`, `engine`, `version`, `tls`, `privileges.create-user`. */
+  Name: string;
+  Passed: boolean;
+  Detail: string;
+}
+
+/**
+ * What the backend found.
+ *
+ * Gate registration on {@link ProbeDatabaseServerResponse.IsSupported}, not on
+ * `Success`: `Success` only means the probe ran to completion. An unreachable
+ * or unsuitable server is reported in the body rather than as a non-2xx.
+ */
+export interface ProbeDatabaseServerResponse {
+  Success: boolean;
+  Message: string | null;
+  /** `MySql`, `MariaDb` or `Unknown`. Detected, never supplied by the caller. */
+  Engine: string;
+  EngineVersion: string | null;
+  /** Unmodified `VERSION()`, kept for diagnostics. */
+  RawVersion: string | null;
+  /** Floor is MySQL 8.0 / MariaDB 10.6. */
+  MeetsMinimumVersion: boolean;
+  /** TLS actually negotiated, as opposed to merely requested. */
+  TlsInUse: boolean;
+  CanCreateDatabase: boolean;
+  CanCreateUser: boolean;
+  IsSupported: boolean;
+  Checks: DatabaseServerProbeCheck[];
+}
 
 // ---------- Databases ----------
 

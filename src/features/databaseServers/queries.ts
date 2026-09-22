@@ -4,6 +4,7 @@ import { databaseServersApi } from "@/api/databaseServers";
 import type {
   CreateDatabaseServerInfoRequest,
   DatabaseServerInfoItem,
+  ProbeDatabaseServerRequest,
   UpdateDatabaseServerInfoRequest,
 } from "@/api/types";
 
@@ -38,6 +39,20 @@ export function useDatabaseServer(id: number | undefined) {
       const cached = qc.getQueryData<DatabaseServerInfoItem[]>(KEYS.all);
       return cached?.find((s) => s.Id === id);
     },
+  });
+}
+
+/**
+ * Probes a candidate server on demand.
+ *
+ * A mutation rather than a query despite being read-only: it runs when the
+ * operator asks, against whatever is in the form at that moment, and caching a
+ * result keyed on a password would be both useless and unwise.
+ */
+export function useProbeDatabaseServer() {
+  return useMutation({
+    mutationFn: (request: ProbeDatabaseServerRequest) =>
+      databaseServersApi.probe(request),
   });
 }
 

@@ -31,6 +31,8 @@ import type {
   AuthorizedUserInfoItem,
   CreateDatabaseInfoRequest,
   CreateDatabaseServerInfoRequest,
+  ProbeDatabaseServerRequest,
+  ProbeDatabaseServerResponse,
   CreateStaticDatabaseUserRequest,
   CreateUserRequest,
   DatabaseInfoItem,
@@ -131,6 +133,44 @@ const ROUTES: Route[] = [
   },
   {
     method: "POST",
+    pattern: /^\/probe-database-server$/,
+    handle: ({ body }) => {
+      const req = body as ProbeDatabaseServerRequest;
+      // Demo mode has no server to reach, so the probe answers from the shape of
+      // the request. A host mentioning "maria" comes back as MariaDB purely so
+      // the two-engine rendering can be exercised without one.
+      const isMariaDb = /maria/i.test(req.Host ?? "");
+      const engine = isMariaDb ? "MariaDb" : "MySql";
+      const version = isMariaDb ? "10.11.6" : "8.4.3";
+      return ok<ProbeDatabaseServerResponse>({
+        Success: true,
+        Message: `${engine} ${version} is supported and this login can provision.`,
+        Engine: engine,
+        EngineVersion: version,
+        RawVersion: isMariaDb ? `5.5.5-${version}-MariaDB-log` : version,
+        MeetsMinimumVersion: true,
+        TlsInUse: true,
+        CanCreateDatabase: true,
+        CanCreateUser: true,
+        IsSupported: true,
+        Checks: [
+          { Name: "connect", Passed: true, Detail: `Connected to ${req.Host}:${req.Port ?? "3306"}.` },
+          { Name: "engine", Passed: true, Detail: `Detected ${engine} from the server itself.` },
+          {
+            Name: "version",
+            Passed: true,
+            Detail: `${engine} ${version} meets the ${isMariaDb ? "10.6" : "8.0"} minimum.`,
+          },
+          { Name: "tls", Passed: true, Detail: "TLS negotiated (TLS_AES_256_GCM_SHA384)." },
+          { Name: "privileges.create-database", Passed: true, Detail: "Login can create databases." },
+          { Name: "privileges.create-user", Passed: true, Detail: "Login can create users." },
+          { Name: "privileges.grant-option", Passed: true, Detail: "Login holds GRANT OPTION." },
+        ],
+      });
+    },
+  },
+  {
+    method: "POST",
     pattern: /^\/create-database-server-info$/,
     handle: ({ body }) => {
       const req = body as CreateDatabaseServerInfoRequest;
@@ -141,8 +181,10 @@ const ROUTES: Route[] = [
         LocalServerAddress: req.LocalServerAddress,
         RemoteServerAddress: req.RemoteServerAddress,
         ServerPort: req.ServerPort,
+        AdminUserName: req.AdminUserName,
         RootUserPassword: req.RootUserPassword,
         Certificate: req.Certificate,
+        SecurityGroupId: req.SecurityGroupId,
       };
       demoStore.servers.push(next);
       demoStore.recordAdminEvent(`Created database server ${next.Name}`);
