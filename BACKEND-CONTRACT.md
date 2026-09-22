@@ -146,6 +146,79 @@ record, so this should never fire in normal use. It exists so that a caller
 holding a stale idea of where a customer lives finds out immediately instead of
 silently creating a user who cannot reach their database.
 
+### 1.4 Migration sessions
+
+The streaming-migration flow. The portal mints a key for one customer's move and
+shows it once; the operator pastes it into the MariaDB installer, which redeems
+it for credentials scoped to that one schema and streams the database in.
+
+| Method | URL | Request | Response |
+| ------ | --- | ------- | -------- |
+| POST | `/My/create-migration-session` | `CreateMigrationSessionRequest` | `CreateMigrationSessionResponse` |
+| GET | `/My/get-migration-sessions` | — | `GetMigrationSessionsResponse` |
+| GET | `/My/get-migration-session/{id}` | — | `GetMigrationSessionResponse` |
+| POST | `/My/revoke-migration-session/{id}` | — | `{ Success, Message }` |
+
+Three further endpoints exist for the installer and are **not for the portal**:
+`redeem-migration-key`, `migration-session/heartbeat` and
+`migration-session/complete`. They authenticate with the migration key and the
+session token rather than the `api-key` header, because they are called from a
+machine on an office network which has no business holding the admin key.
+
+**Minting.** Supply exactly one of `DatabaseId` (an existing database) or
+`DatabaseName` (one to provision). Both or neither is a 400: the two readings do
+different things to a customer's data. An existing database must be on the named
+server and must already belong to the named customer.
+
+```jsonc
+// CreateMigrationSessionRequest
+{
+  "DatabaseServerId": 3,
+  "DatabaseId": null,            // XOR with DatabaseName
+  "DatabaseName": "easyopti_1042",
+  "CrystalPmId": 1042,
+  "CreatedByAdmin": "erik.griffin",
+  "ExpiresInMinutes": 120,       // optional; clamped to 5..1440, defaults 120
+}
+
+// CreateMigrationSessionResponse
+{
+  "Success": true,
+  "SessionId": 17,
+  "MigrationKey": "CPM-7K4D-9QX2-8M3T",   // SHOWN ONCE. Never retrievable again.
+  "MigrationKeyPrefix": "7K4D",
+  "ExpiresUtc": "2026-09-22T19:04:11Z",
+  "TargetSummary": "Customer 1042 into 'easyopti_1042' on server 3.",
+}
+```
+
+Two things the UI must get right:
+
+**`MigrationKey` is shown once.** Only its hash is stored, so it cannot be read
+back. Reuse the reveal-once pattern from `StaticUsersPage.tsx` with a copy
+button, and do not let the modal close without the operator having had a chance
+to copy it. Losing it means minting another and revoking this one.
+
+**`TargetSummary` is the confirmation text.** It names the customer and
+destination, and appends a warning when that customer already has a database on
+a different server — legal, since `crystalpm_id` is unique per server rather
+than globally, and also exactly what a customer being split across two servers
+looks like. Show it in the confirm step, not after.
+
+**Statuses**: `pending` → `redeemed` → `streaming` → `completed` | `failed`,
+plus `expired` and `revoked`. `get-migration-sessions` sweeps expiries before
+returning, so the list does not show dead keys as pending.
+
+`get-migration-session/{id}` returns the session plus a `Progress` array
+(`Phase`, `TableName`, `RowsDone`, `RowsTotal`, `BytesDone`, `Message`,
+`IsError`, `UtcTimestamp`), oldest first. A migration that dies partway reports
+where it got to; surface the last non-null `Phase` and `TableName` rather than
+only that it failed.
+
+**Revoking** is how a key minted for the wrong customer is undone. A session that
+already finished returns `Success: false` with a message rather than being
+rewritten.
+
 The UI's behavior on common error codes:
 
 | Status | UI behavior                                                                                 |
