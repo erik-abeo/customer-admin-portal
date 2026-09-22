@@ -10,11 +10,17 @@ interface ImportMetaEnv {
   readonly VITE_FEATURE_DELETES?: string;
   readonly VITE_FEATURE_RBAC?: string;
   readonly VITE_FEATURE_AUDIT_SINK?: string;
+  readonly VITE_FEATURE_MIGRATIONS?: string;
 
   // Operational integrations (all optional).
   readonly VITE_SENTRY_DSN?: string;
   readonly VITE_ENVIRONMENT?: string;
   readonly VITE_AUDIT_SINK_URL?: string;
+  readonly VITE_IDLE_TIMEOUT_MINUTES?: string;
+  readonly VITE_IDLE_WARN_MINUTES?: string;
+
+  // Demo mode: an in-memory backend. Never set in production.
+  readonly VITE_DEMO_MODE?: string;
 }
 
 interface ImportMeta {

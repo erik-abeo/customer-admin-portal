@@ -5,6 +5,7 @@ import {
   StaticApiKeyAuthStrategy,
   getAdminName,
   getAuthStrategy,
+  messageFromBody,
   setAdminName,
   setAuthStrategy,
 } from "./httpClient";
@@ -18,6 +19,38 @@ describe("ApiError", () => {
     expect(e.status).toBe(500);
     expect(e.details).toEqual({ trace: "abc" });
     expect(e.name).toBe("ApiError");
+  });
+});
+
+describe("messageFromBody", () => {
+  it("reads the service's PascalCase Message", () => {
+    // What a 409 from redeem or a 400 from create-customer-move looks like.
+    expect(
+      messageFromBody({
+        Success: false,
+        Message: "The customer is already on that server.",
+      }),
+    ).toBe("The customer is already on that server.");
+  });
+
+  it("falls back to camelCase and to ASP.NET's problem-details title", () => {
+    expect(messageFromBody({ message: "from a proxy" })).toBe("from a proxy");
+    expect(messageFromBody({ title: "One or more validation errors occurred." })).toBe(
+      "One or more validation errors occurred.",
+    );
+  });
+
+  it("prefers Message when a body carries more than one", () => {
+    expect(messageFromBody({ Message: "the reason", title: "Conflict" })).toBe(
+      "the reason",
+    );
+  });
+
+  it("has nothing to offer for an empty or missing explanation", () => {
+    expect(messageFromBody({ Success: false, Message: null })).toBeUndefined();
+    expect(messageFromBody({ Message: "  " })).toBeUndefined();
+    expect(messageFromBody(null)).toBeUndefined();
+    expect(messageFromBody("text")).toBeUndefined();
   });
 });
 

@@ -13,6 +13,7 @@ import {
   Text,
   Timeline,
   Tooltip,
+  VisuallyHidden,
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import {
@@ -43,17 +44,12 @@ import {
   useMigrationSessions,
   useRevokeMigrationSession,
 } from "@/features/migrations/queries";
+import {
+  canDiscardTarget,
+  canRevoke,
+  revokeEndsAStream,
+} from "@/features/migrations/sessionActions";
 import { notifyError, notifySuccess } from "@/lib/notify";
-
-/** Statuses a session can still move out of, and therefore still be revoked from. */
-const REVOCABLE = new Set(["pending", "redeemed", "streaming"]);
-
-/**
- * Statuses a target can be discarded from: the migration is over and it did not
- * work. The backend enforces this too, and additionally refuses when the
- * database pre-dated the migration.
- */
-const DISCARDABLE = new Set(["failed", "revoked", "expired"]);
 
 const STATUS_COLOR: Record<string, string> = {
   pending: "blue",
@@ -98,7 +94,16 @@ export function MigrationsPage() {
     request: CreateMigrationSessionRequest;
     description: string;
   } | null>(null);
-  const [mintedKey, setMintedKey] = useState<CreateMigrationSessionResponse | null>(null);
+  const [mintedKey, setMintedKey] = useState<CreateMigrationSessionResponse | null>(
+    null,
+  );
+
+  // The mutation's cached result holds the key too, so it is cleared along with
+  // the modal rather than left in memory after the operator has copied it.
+  const closeMintedKey = () => {
+    setMintedKey(null);
+    createSession.reset();
+  };
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const detail = useMigrationSession(detailId ?? undefined);
@@ -108,7 +113,9 @@ export function MigrationsPage() {
     try {
       const response = await createSession.mutateAsync(pending.request);
       if (!response.Success) {
-        notifyError(new Error(response.Message ?? "Could not create the migration key"));
+        notifyError(
+          new Error(response.Message ?? "Could not create the migration key"),
+        );
         return;
       }
       setPending(null);
@@ -125,11 +132,19 @@ export function MigrationsPage() {
     modals.openConfirmModal({
       title: "Revoke this migration key?",
       children: (
-        <Text size="sm">
-          The key ending <Code>{session.MigrationKeyPrefix}</Code> for customer{" "}
-          <b>{session.CrystalPmId}</b> will stop working immediately. Any migration
-          already running under it will fail at its next call.
-        </Text>
+        <Stack gap="xs">
+          <Text size="sm">
+            The key starting <Code>{session.MigrationKeyPrefix}</Code> for customer{" "}
+            <b>{session.CrystalPmId}</b> will stop working immediately.
+          </Text>
+          {revokeEndsAStream(session) && (
+            <Text size="sm">
+              It has already been redeemed, so the installer&apos;s database login is
+              dropped and its connections ended: the stream stops mid-copy. Whatever it
+              had written stays in the target until that is discarded.
+            </Text>
+          )}
+        </Stack>
       ),
       labels: { confirm: "Revoke key", cancel: "Keep it" },
       confirmProps: { color: "red" },
@@ -177,8 +192,8 @@ export function MigrationsPage() {
   const rows = (sessions.data ?? []).map((session) => (
     <Table.Tr key={session.Id}>
       <Table.Td>
-        <Badge variant="light" color={STATUS_COLOR[session.Status] ?? "gray"}>
-          {session.Status}
+        <Badge variant="light" color={STATUS_COLOR[session.Status ?? ""] ?? "gray"}>
+          {session.Status ?? "unknown"}
         </Badge>
       </Table.Td>
       <Table.Td>{session.CrystalPmId}</Table.Td>
@@ -196,7 +211,12 @@ export function MigrationsPage() {
       <Table.Td>{formatUtc(session.CreatedDateTimeUtc)}</Table.Td>
       <Table.Td>
         <Group gap="xs" justify="flex-end" wrap="nowrap">
-          <Button size="compact-sm" variant="subtle" onClick={() => setDetailId(session.Id)}>
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            aria-label={`Details of migration ${session.Id} for customer ${session.CrystalPmId}`}
+            onClick={() => setDetailId(session.Id)}
+          >
             Details
           </Button>
           <RequireRole role="admin">
@@ -204,21 +224,24 @@ export function MigrationsPage() {
               size="compact-sm"
               variant="subtle"
               color="red"
-              disabled={!REVOCABLE.has(session.Status)}
+              aria-label={`Revoke the key for customer ${session.CrystalPmId}`}
+              disabled={!canRevoke(session)}
               onClick={() => confirmRevoke(session)}
             >
               Revoke
             </Button>
             {/*
-              Only shown for a target this migration created. A session that
-              streamed into a pre-existing database never offers it, so the
-              destructive action is absent rather than present and refused.
+              Only shown for a target this migration created and that is still
+              there. A session that streamed into a pre-existing database never
+              offers it, so the destructive action is absent rather than present
+              and refused.
             */}
-            {DISCARDABLE.has(session.Status) && session.ProvisionDatabaseName && (
+            {canDiscardTarget(session) && (
               <Button
                 size="compact-sm"
                 variant="subtle"
                 color="red"
+                aria-label={`Discard the target of migration ${session.Id}`}
                 onClick={() => confirmDiscard(session)}
               >
                 Discard target
@@ -237,7 +260,10 @@ export function MigrationsPage() {
         description="Mint a key that moves one customer onto a remote database, and watch it run."
         actions={
           <RequireRole role="admin">
-            <Button leftSection={<IconPlus size={16} />} onClick={() => setFormOpen(true)}>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={() => setFormOpen(true)}
+            >
               New migration
             </Button>
           </RequireRole>
@@ -262,7 +288,9 @@ export function MigrationsPage() {
                 <Table.Th>Key</Table.Th>
                 <Table.Th>Phase</Table.Th>
                 <Table.Th>Created</Table.Th>
-                <Table.Th />
+                <Table.Th>
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>{rows}</Table.Tbody>
@@ -298,7 +326,11 @@ export function MigrationsPage() {
       >
         {pending && (
           <Stack gap="md">
-            <Alert color="yellow" variant="light" icon={<IconAlertTriangle size={16} />}>
+            <Alert
+              color="yellow"
+              variant="light"
+              icon={<IconAlertTriangle size={16} />}
+            >
               <Text size="sm">
                 A key will be minted that lets an installer stream{" "}
                 <b>{pending.description}</b>. Streaming one customer&apos;s records over
@@ -326,12 +358,19 @@ export function MigrationsPage() {
         only as a hash, so closing this without copying means revoking the
         session and minting another.
       */}
+      {/*
+        Neither Escape nor a close button dismisses it: both are one keystroke
+        from losing a key that cannot be shown again. The button is the only way
+        out.
+      */}
       <Modal
         opened={mintedKey !== null}
-        onClose={() => setMintedKey(null)}
+        onClose={closeMintedKey}
         title="Migration key"
         size="md"
         closeOnClickOutside={false}
+        closeOnEscape={false}
+        withCloseButton={false}
       >
         {mintedKey && (
           <Stack gap="md">
@@ -351,7 +390,9 @@ export function MigrationsPage() {
                       variant="light"
                       color={copied ? "teal" : "gray"}
                       onClick={copy}
-                      leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                      leftSection={
+                        copied ? <IconCheck size={16} /> : <IconCopy size={16} />
+                      }
                     >
                       {copied ? "Copied" : "Copy"}
                     </Button>
@@ -368,7 +409,7 @@ export function MigrationsPage() {
               Expires {formatUtc(mintedKey.ExpiresUtc)}.
             </Text>
             <Group justify="flex-end">
-              <Button onClick={() => setMintedKey(null)}>Done</Button>
+              <Button onClick={closeMintedKey}>I have copied the key</Button>
             </Group>
           </Stack>
         )}
@@ -386,9 +427,9 @@ export function MigrationsPage() {
               <Group gap="xs">
                 <Badge
                   variant="light"
-                  color={STATUS_COLOR[detail.data.Session.Status] ?? "gray"}
+                  color={STATUS_COLOR[detail.data.Session.Status ?? ""] ?? "gray"}
                 >
-                  {detail.data.Session.Status}
+                  {detail.data.Session.Status ?? "unknown"}
                 </Badge>
                 <Text size="sm">{describeDestination(detail.data.Session)}</Text>
               </Group>
@@ -417,7 +458,11 @@ export function MigrationsPage() {
                 point of recording progress rather than only an outcome.
               */}
               {detail.data.Progress.length > 0 ? (
-                <Timeline active={detail.data.Progress.length} bulletSize={16} lineWidth={2}>
+                <Timeline
+                  active={detail.data.Progress.length}
+                  bulletSize={16}
+                  lineWidth={2}
+                >
                   {detail.data.Progress.map((entry) => (
                     <Timeline.Item
                       key={entry.Id}

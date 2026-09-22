@@ -36,6 +36,19 @@ export const movesApi = {
     return data;
   },
 
+  /**
+   * Stops a move that has not started copying and puts the customer back
+   * online. Only `planned` and `draining` moves can be cancelled; anything
+   * later either cuts over or fails by itself. Refusal comes back as
+   * `Success: false` with the reason.
+   */
+  async cancel(id: number): Promise<CustomerMoveResult> {
+    const { data } = await httpClient.post<CustomerMoveResult>(
+      `/cancel-customer-move/${id}`,
+    );
+    return data;
+  },
+
   /** Points a cut-over customer back at the source. Only while the source still exists. */
   async rollBack(id: number): Promise<CustomerMoveResult> {
     const { data } = await httpClient.post<CustomerMoveResult>(

@@ -5,10 +5,12 @@ import {
   Container,
   Group,
   List,
+  Modal,
   Stack,
   Table,
   Text,
   Tooltip,
+  VisuallyHidden,
 } from "@mantine/core";
 import {
   IconAlertTriangle,
@@ -21,8 +23,13 @@ import { useMemo, useState } from "react";
 import type { CapacityVerdict, ServerCapacity } from "@/api/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
+import { ServerCapacityHistory } from "@/features/capacity/ServerCapacityHistory";
 import { useFleetCapacity } from "@/features/capacity/queries";
-import { formatBytes, recommendPlacement, totalBytes } from "@/features/capacity/placement";
+import {
+  formatBytes,
+  recommendPlacement,
+  totalBytes,
+} from "@/features/capacity/placement";
 
 const VERDICT_COLOR: Record<CapacityVerdict, string> = {
   Headroom: "teal",
@@ -51,11 +58,9 @@ const VERDICT_LABEL: Record<CapacityVerdict, string> = {
 export function CapacityPage() {
   const fleet = useFleetCapacity();
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [trendFor, setTrendFor] = useState<ServerCapacity | null>(null);
 
-  const placement = useMemo(
-    () => recommendPlacement(fleet.data ?? []),
-    [fleet.data],
-  );
+  const placement = useMemo(() => recommendPlacement(fleet.data ?? []), [fleet.data]);
 
   /** Always an array, so the caller can spread it without narrowing first. */
   const renderCustomerRows = (server: ServerCapacity): JSX.Element[] => {
@@ -146,15 +151,25 @@ export function CapacityPage() {
             : "—"}
         </Table.Td>
         <Table.Td>
-          <Button
-            size="compact-sm"
-            variant="subtle"
-            onClick={() =>
-              setExpanded(isExpanded ? null : server.DatabaseServerId)
-            }
-          >
-            {isExpanded ? "Hide" : "Customers"}
-          </Button>
+          <Group gap="xs" justify="flex-end" wrap="nowrap">
+            <Button
+              size="compact-sm"
+              variant="subtle"
+              aria-expanded={isExpanded}
+              aria-label={`${isExpanded ? "Hide" : "Show"} customers on ${server.Name ?? "this server"}`}
+              onClick={() => setExpanded(isExpanded ? null : server.DatabaseServerId)}
+            >
+              {isExpanded ? "Hide" : "Customers"}
+            </Button>
+            <Button
+              size="compact-sm"
+              variant="subtle"
+              aria-label={`Trend for ${server.Name ?? "this server"}`}
+              onClick={() => setTrendFor(server)}
+            >
+              Trend
+            </Button>
+          </Group>
         </Table.Td>
       </Table.Tr>
     );
@@ -221,7 +236,9 @@ export function CapacityPage() {
                 <IconAlertTriangle size={16} />
               )
             }
-            title={placement.recommended ? "Recommended destination" : "No clear destination"}
+            title={
+              placement.recommended ? "Recommended destination" : "No clear destination"
+            }
           >
             <Text size="sm">{placement.summary}</Text>
           </Alert>
@@ -234,8 +251,8 @@ export function CapacityPage() {
           <Group gap="xs">
             <IconInfoCircle size={14} />
             <Text size="xs" c="dimmed">
-              Only a server with clear room is recommended. One near capacity can still be
-              chosen, deliberately.
+              Only a server with clear room is recommended. One near capacity can still
+              be chosen, deliberately.
             </Text>
           </Group>
 
@@ -249,7 +266,9 @@ export function CapacityPage() {
                   <Table.Th>Users</Table.Th>
                   <Table.Th>Size</Table.Th>
                   <Table.Th>Connections</Table.Th>
-                  <Table.Th />
+                  <Table.Th>
+                    <VisuallyHidden>Actions</VisuallyHidden>
+                  </Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>{rows}</Table.Tbody>
@@ -257,6 +276,17 @@ export function CapacityPage() {
           </Table.ScrollContainer>
         </Stack>
       </QueryStatus>
+
+      <Modal
+        opened={trendFor !== null}
+        onClose={() => setTrendFor(null)}
+        title={`Trend: ${trendFor?.Name ?? ""}`}
+        size="lg"
+      >
+        {trendFor && (
+          <ServerCapacityHistory databaseServerId={trendFor.DatabaseServerId} />
+        )}
+      </Modal>
     </Container>
   );
 }

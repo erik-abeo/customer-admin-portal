@@ -125,7 +125,22 @@ export function DatabaseServerForm({
   });
 
   const probe = useProbeDatabaseServer();
-  const [probeResult, setProbeResult] = useState<ProbeDatabaseServerResponse | null>(null);
+  const [probed, setProbed] = useState<{
+    for: string;
+    result: ProbeDatabaseServerResponse;
+  } | null>(null);
+
+  // A result describes the address, login and certificate it was run with. Once
+  // any of those changes it describes a different server, so it stops showing
+  // rather than vouching for something nobody has checked.
+  const probeInputs = JSON.stringify([
+    form.values.LocalServerAddress.trim(),
+    String(form.values.ServerPort),
+    form.values.AdminUserName.trim(),
+    form.values.RootUserPassword,
+    form.values.Certificate.trim(),
+  ]);
+  const probeResult = probed?.for === probeInputs ? probed.result : null;
 
   // The probe needs somewhere to connect and something to connect as. Without a
   // password there is nothing to test, and in edit mode the stored one is never
@@ -136,7 +151,8 @@ export function DatabaseServerForm({
     form.values.RootUserPassword.length > 0;
 
   const runProbe = async () => {
-    setProbeResult(null);
+    setProbed(null);
+    const inputs = probeInputs;
     try {
       const result = await probe.mutateAsync({
         Host: form.values.LocalServerAddress.trim(),
@@ -146,12 +162,12 @@ export function DatabaseServerForm({
         SslMode: "Required",
         CertificatePem: form.values.Certificate.trim() || null,
       });
-      setProbeResult(result);
+      setProbed({ for: inputs, result });
     } catch {
       // An unreachable or unsuitable server is reported in the body, so reaching
       // here means the request itself failed. The global handler has already
       // raised that; clearing the panel avoids showing a stale pass.
-      setProbeResult(null);
+      setProbed(null);
     }
   };
 
@@ -173,13 +189,14 @@ export function DatabaseServerForm({
       RemoteServerAddress: values.RemoteServerAddress.trim() || null,
       ServerPort: values.ServerPort,
       AdminUserName: values.AdminUserName.trim(),
-      Certificate: values.Certificate.trim() || null,
       SecurityGroupId: values.SecurityGroupId.trim() || null,
     };
     if (initial) {
       const payload: UpdateDatabaseServerInfoRequest = {
         Id: initial.Id,
         ...base,
+        // Blank on edit sends null, which the service reads as "keep the stored one".
+        Certificate: values.Certificate.trim() || null,
         RootUserPassword:
           values.RootUserPassword.length > 0
             ? values.RootUserPassword
@@ -189,6 +206,8 @@ export function DatabaseServerForm({
     } else {
       const payload: CreateDatabaseServerInfoRequest = {
         ...base,
+        // Required on create, and the validator above has already refused a blank one.
+        Certificate: values.Certificate.trim(),
         RootUserPassword: values.RootUserPassword,
       };
       await onSubmit(payload);

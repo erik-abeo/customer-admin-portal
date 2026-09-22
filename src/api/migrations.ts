@@ -48,8 +48,9 @@ export const migrationsApi = {
    * Drops the destination a failed migration left behind.
    *
    * The backend refuses unless the session finished unsuccessfully *and* created
-   * that database itself, so a migration aimed at a pre-existing database can
-   * never take it down. Destroys data; there is no undo.
+   * that database itself (`DatabaseCreated`), so a migration aimed at a
+   * pre-existing database can never take it down. Destroys data; there is no
+   * undo.
    */
   async discardTarget(
     id: number,
@@ -61,7 +62,13 @@ export const migrationsApi = {
     return data;
   },
 
-  /** Stops a key working. How a key minted for the wrong customer is undone. */
+  /**
+   * Stops a key working. How a key minted for the wrong customer is undone.
+   *
+   * For a key already redeemed it also drops the installer's database login and
+   * ends its connections, so a running stream stops at once rather than at its
+   * next call. What it had written stays in the target.
+   */
   async revoke(id: number): Promise<{ Success: boolean; Message: string | null }> {
     const { data } = await httpClient.post<{
       Success: boolean;

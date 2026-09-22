@@ -36,6 +36,10 @@ import { features } from "@/config/env";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { DatabaseForm } from "@/features/databases/DatabaseForm";
 import {
+  DATABASE_STATUS_COLOR,
+  databaseStatusLabel,
+} from "@/features/databases/status";
+import {
   useCreateDatabase,
   useDatabases,
   useDeleteDatabase,
@@ -101,12 +105,13 @@ export function DatabasesPage() {
 
   const exportCsv = useCallback(() => {
     const csv = toCsv(
-      ["Id", "Database name", "Server", "CrystalPM ID", "Description"],
+      ["Id", "Database name", "Server", "CrystalPM ID", "Status", "Description"],
       table.filteredRows.map((d) => [
         d.Id,
         d.DatabaseName,
         serverNameById[d.DatabaseServerId] ?? `#${d.DatabaseServerId}`,
         d.CrystalPmId,
+        databaseStatusLabel(d.Status),
         d.Description ?? "",
       ]),
     );
@@ -255,6 +260,7 @@ export function DatabasesPage() {
                     >
                       CrystalPM ID
                     </SortableHeader>
+                    <Table.Th>Status</Table.Th>
                     <Table.Th>Description</Table.Th>
                     <Table.Th style={{ width: 110 }}>Actions</Table.Th>
                   </Table.Tr>
@@ -278,6 +284,14 @@ export function DatabasesPage() {
                       <Table.Td>
                         <Badge variant="light" color="crystal">
                           {d.CrystalPmId}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge
+                          variant="light"
+                          color={DATABASE_STATUS_COLOR[d.Status ?? ""] ?? "gray"}
+                        >
+                          {databaseStatusLabel(d.Status)}
                         </Badge>
                       </Table.Td>
                       <Table.Td>

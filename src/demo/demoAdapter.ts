@@ -31,8 +31,11 @@ import type {
   AuthorizedUserInfoItem,
   CreateDatabaseInfoRequest,
   CreateDatabaseServerInfoRequest,
+  CreateCustomerMoveRequest,
   CreateMigrationSessionRequest,
   CreateMigrationSessionResponse,
+  GetServerCapacityHistoryResponse,
+  ServerMetricsPoint,
   GetMigrationSessionResponse,
   GetMigrationSessionsResponse,
   MigrationSessionItem,
@@ -117,6 +120,77 @@ function parseBody(config: InternalAxiosRequestConfig): unknown {
   return config.data;
 }
 
+/** Statuses that block another move for the same customer, as the service counts them. */
+const UNSETTLED_MOVES = new Set([
+  "planned",
+  "draining",
+  "copying",
+  "verifying",
+  "flipped",
+]);
+
+/**
+ * The service's mint refusals that demo mode can reproduce, in its order and
+ * words. The ones that need a real server, such as a schema existing
+ * unregistered, are left to the service.
+ */
+function mintRefusal(req: CreateMigrationSessionRequest): string | null {
+  if (req.DatabaseName !== null) {
+    const name = req.DatabaseName.trim();
+    const existingForCustomer = demoStore.databases.find(
+      (d) =>
+        d.DatabaseServerId === req.DatabaseServerId &&
+        d.CrystalPmId === req.CrystalPmId,
+    );
+    if (existingForCustomer)
+      return `Customer ${req.CrystalPmId} already has '${existingForCustomer.DatabaseName}' on this server. Select it as the existing database instead.`;
+    const sameName = demoStore.databases.find(
+      (d) =>
+        d.DatabaseServerId === req.DatabaseServerId &&
+        d.DatabaseName.toLowerCase() === name.toLowerCase(),
+    );
+    if (sameName)
+      return `A database named '${sameName.DatabaseName}' already exists on this server for customer ${sameName.CrystalPmId}. Choose a name unique to this customer.`;
+    return null;
+  }
+
+  const database = demoStore.databases.find((d) => d.Id === req.DatabaseId);
+  if (!database) return "The selected database no longer exists.";
+  if (database.DatabaseServerId !== req.DatabaseServerId)
+    return "The selected database is not on the selected server. Re-pick the destination.";
+  if (database.CrystalPmId !== req.CrystalPmId)
+    return `The selected database belongs to customer ${database.CrystalPmId}, not ${req.CrystalPmId}.`;
+  // From the database's own status, as the service decides it: a move in
+  // progress shows as `moving`.
+  if (database.Status !== "active")
+    return `The selected database is ${database.Status}, so nothing may be migrated into it.`;
+  return null;
+}
+
+/**
+ * An invented but plausible trend: one snapshot a day, growing slowly towards
+ * today's figures, so the history view has something to show.
+ */
+function demoCapacityHistory(serverId: number, days: number): ServerMetricsPoint[] {
+  const customers = demoStore.databases.filter(
+    (d) => d.DatabaseServerId === serverId,
+  ).length;
+  const now = Date.now();
+  return Array.from({ length: days }, (_, i) => {
+    const age = days - 1 - i;
+    const growth = 1 - age / (days * 4);
+    return {
+      UtcTimestamp: new Date(now - age * 86_400_000).toISOString(),
+      CustomerDatabaseCount: Math.max(0, customers - Math.floor(age / 45)),
+      AuthorizedUserCount: Math.round((customers * 4 + 2) * growth),
+      DataBytes: Math.round(customers * 1_400_000_000 * growth),
+      IndexBytes: Math.round(customers * 160_000_000 * growth),
+      ApproxRowCount: Math.round(customers * 1_600_000 * growth),
+      DatabaseConnections: 12 + ((i * 7 + serverId * 3) % 17),
+    };
+  });
+}
+
 const ROUTES: Route[] = [
   // ---------- Database servers ----------
   {
@@ -144,13 +218,18 @@ const ROUTES: Route[] = [
     method: "GET",
     pattern: /^\/get-customer-moves$/,
     handle: () =>
-      ok<GetCustomerMovesResponse>({ Success: true, Message: null, Moves: demoStore.customerMoves }),
+      ok<GetCustomerMovesResponse>({
+        Success: true,
+        Message: null,
+        Moves: demoStore.customerMoves,
+      }),
   },
   {
     method: "GET",
     pattern: /^\/get-customer-move\/(\d+)$/,
+    paramNames: ["id"],
     handle: ({ params }) => {
-      const id = Number(params[0]);
+      const id = Number(params.id);
       const move = demoStore.customerMoves.find((m) => m.Id === id);
       if (!move) return notFound(`Move ${id} not found`);
       return ok({
@@ -165,13 +244,47 @@ const ROUTES: Route[] = [
     method: "POST",
     pattern: /^\/create-customer-move$/,
     handle: ({ body }) => {
-      const req = body as {
-        DatabaseId: number;
-        TargetDatabaseServerId: number;
-        TargetDatabaseName: string | null;
-      };
+      const req = body as CreateCustomerMoveRequest;
       const database = demoStore.databases.find((d) => d.Id === req.DatabaseId);
-      if (!database) return ok({ Success: false, Message: "That database does not exist.", MoveId: 0 });
+      // Refused the way the service refuses, so demo mode shows the same words.
+      if (!database)
+        return {
+          status: 400,
+          data: { Success: false, Message: "That database does not exist.", MoveId: 0 },
+        };
+      if (database.DatabaseServerId === req.TargetDatabaseServerId)
+        return {
+          status: 400,
+          data: {
+            Success: false,
+            Message: "The customer is already on that server.",
+            MoveId: 0,
+          },
+        };
+      if (database.Status !== "active")
+        return {
+          status: 400,
+          data: {
+            Success: false,
+            Message: `This database is ${database.Status}. Only an active database can be moved.`,
+            MoveId: 0,
+          },
+        };
+      if (
+        demoStore.customerMoves.some(
+          (m) => m.DatabaseId === database.Id && UNSETTLED_MOVES.has(m.Status ?? ""),
+        )
+      ) {
+        return {
+          status: 400,
+          data: {
+            Success: false,
+            Message:
+              "This customer already has a move in progress, or one that has cut over and not been settled. Settle or roll that back first.",
+            MoveId: 0,
+          },
+        };
+      }
 
       const source = demoStore.servers.find((s) => s.Id === database.DatabaseServerId);
       const target = demoStore.servers.find((s) => s.Id === req.TargetDatabaseServerId);
@@ -188,8 +301,8 @@ const ROUTES: Route[] = [
         TargetDatabaseName: req.TargetDatabaseName ?? database.DatabaseName,
         SourceDatabaseName: database.DatabaseName,
         Status: "planned",
-        PhaseDetail: "Waiting for open sessions to end.",
-        RequestedByAdmin: "demo.admin",
+        PhaseDetail: "Waiting for the executor to reserve the target.",
+        RequestedByAdmin: req.RequestedByAdmin,
         CreatedDateTimeUtc: new Date().toISOString(),
         QuiescedDateTimeUtc: null,
         CopyStartedDateTimeUtc: null,
@@ -201,36 +314,89 @@ const ROUTES: Route[] = [
         ErrorMessage: null,
       };
       demoStore.customerMoves = [move, ...demoStore.customerMoves];
-      return ok({ Success: true, MoveId: id, Message: "Move planned. The customer stays online until the copy is ready to begin." });
+      // What planning does on the service: the customer stops getting new sessions.
+      database.Status = "moving";
+      return ok({
+        Success: true,
+        MoveId: id,
+        Message:
+          "Move planned. Within moments the target is reserved and the customer stops getting new sessions; sessions already open are left to finish before the copy starts.",
+      });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/cancel-customer-move\/(\d+)$/,
+    paramNames: ["id"],
+    handle: ({ params }) => {
+      const move = demoStore.customerMoves.find((m) => m.Id === Number(params.id));
+      if (!move) return notFound("Move not found");
+      if (move.Status !== "planned" && move.Status !== "draining") {
+        return ok({
+          Success: false,
+          Message: `This move is ${move.Status}. Only a move that has not started copying can be cancelled.`,
+          MoveId: move.Id,
+        });
+      }
+      move.Status = "cancelled";
+      const cancelled = demoStore.databases.find((d) => d.Id === move.DatabaseId);
+      if (cancelled?.Status === "moving") cancelled.Status = "active";
+      move.PhaseDetail =
+        "Cancelled by an operator before copying began. The customer was put back online.";
+      return ok({
+        Success: true,
+        MoveId: move.Id,
+        Message: "Move cancelled. The customer is back online on the source.",
+      });
     },
   },
   {
     method: "POST",
     pattern: /^\/roll-back-customer-move\/(\d+)$/,
+    paramNames: ["id"],
     handle: ({ params }) => {
-      const move = demoStore.customerMoves.find((m) => m.Id === Number(params[0]));
+      const move = demoStore.customerMoves.find((m) => m.Id === Number(params.id));
       if (!move) return notFound("Move not found");
       if (move.Status !== "flipped") {
-        return ok({ Success: false, Message: `This move is ${move.Status}. Only a move that has cut over can be rolled back.`, MoveId: move.Id });
+        return ok({
+          Success: false,
+          Message: `This move is ${move.Status}. Only a move that has cut over can be rolled back.`,
+          MoveId: move.Id,
+        });
       }
       move.Status = "rolled_back";
-      move.PhaseDetail = "Pointed back at the source. The target copy is left in place.";
-      return ok({ Success: true, MoveId: move.Id, Message: "Pointed back at the source." });
+      move.PhaseDetail =
+        "Pointed back at the source. The target copy is left in place.";
+      return ok({
+        Success: true,
+        MoveId: move.Id,
+        Message:
+          "Pointed back at the source. Anything written on the target since the cutover is still there, not in the source, and the target copy is left in place.",
+      });
     },
   },
   {
     method: "POST",
     pattern: /^\/drop-customer-move-source\/(\d+)$/,
+    paramNames: ["id"],
     handle: ({ params }) => {
-      const move = demoStore.customerMoves.find((m) => m.Id === Number(params[0]));
+      const move = demoStore.customerMoves.find((m) => m.Id === Number(params.id));
       if (!move) return notFound("Move not found");
       if (move.Status !== "flipped") {
-        return ok({ Success: false, Message: `This move is ${move.Status}. Only a move that cut over cleanly has a source to retire.`, MoveId: move.Id });
+        return ok({
+          Success: false,
+          Message: `This move is ${move.Status}. Only a move that cut over cleanly has a source to retire.`,
+          MoveId: move.Id,
+        });
       }
       move.Status = "settled";
       move.SourceDroppedDateTimeUtc = new Date().toISOString();
       move.PhaseDetail = "Source dropped. This move can no longer be rolled back.";
-      return ok({ Success: true, MoveId: move.Id, Message: `Dropped '${move.SourceDatabaseName}'.` });
+      return ok({
+        Success: true,
+        MoveId: move.Id,
+        Message: `Dropped '${move.SourceDatabaseName}'.`,
+      });
     },
   },
   {
@@ -286,7 +452,29 @@ const ROUTES: Route[] = [
         };
       });
 
-      return ok<GetFleetCapacityResponse>({ Success: true, Message: null, Servers: servers });
+      return ok<GetFleetCapacityResponse>({
+        Success: true,
+        Message: null,
+        Servers: servers,
+      });
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/get-server-capacity-history\/(\d+)$/,
+    paramNames: ["id"],
+    handle: ({ params, search }) => {
+      const id = Number(params.id);
+      if (!demoStore.servers.some((s) => s.Id === id))
+        return notFound(`Database server ${id} does not exist.`);
+      const days = Math.min(400, Math.max(1, Number(search.get("days")) || 90));
+      return ok<GetServerCapacityHistoryResponse>({
+        Success: true,
+        Message: null,
+        DatabaseServerId: id,
+        Days: days,
+        Points: demoCapacityHistory(id, days),
+      });
     },
   },
   {
@@ -302,8 +490,9 @@ const ROUTES: Route[] = [
   {
     method: "GET",
     pattern: /^\/get-migration-session\/(\d+)$/,
+    paramNames: ["id"],
     handle: ({ params }) => {
-      const id = Number(params[0]);
+      const id = Number(params.id);
       const session = demoStore.migrationSessions.find((m) => m.Id === id);
       if (!session) return notFound(`Migration session ${id} not found`);
       return ok<GetMigrationSessionResponse>({
@@ -319,6 +508,9 @@ const ROUTES: Route[] = [
     pattern: /^\/create-migration-session$/,
     handle: ({ body }) => {
       const req = body as CreateMigrationSessionRequest;
+      const refusal = mintRefusal(req);
+      if (refusal) return { status: 400, data: { Success: false, Message: refusal } };
+
       const id = demoStore.migrationSessionIds.next();
       const server = demoStore.servers.find((s) => s.Id === req.DatabaseServerId);
       const database = demoStore.databases.find((d) => d.Id === req.DatabaseId);
@@ -328,16 +520,19 @@ const ROUTES: Route[] = [
 
       // A fixed key in demo mode. It is not a secret here and a stable value is
       // easier to talk about when showing somebody the reveal-once modal.
-      const key = "CPM-DEMO-KEY1-0000";
+      // Crockford base32, four groups, like a real one: no I, L, O or U.
+      const key = "CPM-D3M0-0000-0000-0001";
 
       const session: MigrationSessionItem = {
         Id: id,
-        MigrationKeyPrefix: "DEMO",
+        MigrationKeyPrefix: "D3M0",
         DatabaseServerId: req.DatabaseServerId,
         DatabaseServerName: server?.Name ?? null,
         DatabaseId: req.DatabaseId,
         DatabaseName: database?.DatabaseName ?? null,
         ProvisionDatabaseName: req.DatabaseName,
+        // Nothing is created until an installer redeems the key.
+        DatabaseCreated: false,
         CrystalPmId: req.CrystalPmId,
         Status: "pending",
         Phase: null,
@@ -356,17 +551,20 @@ const ROUTES: Route[] = [
       demoStore.migrationSessions = [session, ...demoStore.migrationSessions];
 
       const elsewhere = demoStore.databases.filter(
-        (d) => d.CrystalPmId === req.CrystalPmId && d.DatabaseServerId !== req.DatabaseServerId,
+        (d) =>
+          d.CrystalPmId === req.CrystalPmId &&
+          d.DatabaseServerId !== req.DatabaseServerId,
       );
       const target =
         database?.DatabaseName ?? req.DatabaseName ?? "the selected database";
 
       return ok<CreateMigrationSessionResponse>({
         Success: true,
-        Message: "Migration key created. It is shown once and cannot be retrieved again.",
+        Message:
+          "Migration key created. It is shown once and cannot be retrieved again.",
         SessionId: id,
         MigrationKey: key,
-        MigrationKeyPrefix: "DEMO",
+        MigrationKeyPrefix: "D3M0",
         ExpiresUtc: expires,
         TargetSummary:
           `Customer ${req.CrystalPmId} into '${target}' on server ${req.DatabaseServerId}.` +
@@ -381,38 +579,54 @@ const ROUTES: Route[] = [
   {
     method: "POST",
     pattern: /^\/discard-migration-target\/(\d+)$/,
+    paramNames: ["id"],
     handle: ({ params }) => {
-      const id = Number(params[0]);
+      const id = Number(params.id);
       const session = demoStore.migrationSessions.find((m) => m.Id === id);
       if (!session) return notFound(`Migration session ${id} not found`);
-      if (!["failed", "revoked", "expired"].includes(session.Status)) {
+      if (!["failed", "revoked", "expired"].includes(session.Status ?? "")) {
         return ok({
           Success: false,
           Message: `This session is ${session.Status}. Only a migration that has finished unsuccessfully can have its target discarded.`,
         });
       }
-      if (!session.ProvisionDatabaseName) {
+      if (!session.DatabaseCreated) {
         return ok({
           Success: false,
+          Message: session.ProvisionDatabaseName
+            ? "Nothing to discard: the key was never redeemed, so no database was created."
+            : "Nothing to discard: this migration targeted a database that already existed, which is not this migration's to drop.",
+        });
+      }
+      if (session.DatabaseId === null) {
+        // Success, as the service answers: what was asked for is already true.
+        return ok({
+          Success: true,
           Message:
-            "This migration targeted a database that already existed, so it is not this migration's to drop.",
+            "Nothing to discard: this migration's database has already been dropped.",
         });
       }
       const dropped = session.DatabaseName ?? session.ProvisionDatabaseName;
-      demoStore.databases = demoStore.databases.filter((d) => d.Id !== session.DatabaseId);
+      demoStore.databases = demoStore.databases.filter(
+        (d) => d.Id !== session.DatabaseId,
+      );
       session.DatabaseId = null;
       session.DatabaseName = null;
-      return ok({ Success: true, Message: `Dropped '${dropped}'. Mint a new key to try again.` });
+      return ok({
+        Success: true,
+        Message: `Dropped '${dropped}'. Mint a new key to try again.`,
+      });
     },
   },
   {
     method: "POST",
     pattern: /^\/revoke-migration-session\/(\d+)$/,
+    paramNames: ["id"],
     handle: ({ params }) => {
-      const id = Number(params[0]);
+      const id = Number(params.id);
       const session = demoStore.migrationSessions.find((m) => m.Id === id);
       if (!session) return notFound(`Migration session ${id} not found`);
-      if (!["pending", "redeemed", "streaming"].includes(session.Status)) {
+      if (!["pending", "redeemed", "streaming"].includes(session.Status ?? "")) {
         return ok({
           Success: false,
           Message: `This session is already ${session.Status} and cannot be revoked.`,
@@ -420,7 +634,12 @@ const ROUTES: Route[] = [
       }
       session.Status = "revoked";
       session.CompletedDateTimeUtc = new Date().toISOString();
-      return ok({ Success: true, Message: "Migration key revoked." });
+      return ok({
+        Success: true,
+        Message: session.MigrationUserName
+          ? "Migration key revoked. The installer's database login was dropped and its connections ended, so the stream has stopped. Whatever it had already written is still in the target."
+          : "Migration key revoked.",
+      });
     },
   },
   {
@@ -444,19 +663,44 @@ const ROUTES: Route[] = [
         TlsInUse: true,
         CanCreateDatabase: true,
         CanCreateUser: true,
+        CanGrant: true,
         IsSupported: true,
         Checks: [
-          { Name: "connect", Passed: true, Detail: `Connected to ${req.Host}:${req.Port ?? "3306"}.` },
-          { Name: "engine", Passed: true, Detail: `Detected ${engine} from the server itself.` },
+          {
+            Name: "connect",
+            Passed: true,
+            Detail: `Connected to ${req.Host}:${req.Port ?? "3306"}.`,
+          },
+          {
+            Name: "engine",
+            Passed: true,
+            Detail: `Detected ${engine} from the server itself.`,
+          },
           {
             Name: "version",
             Passed: true,
             Detail: `${engine} ${version} meets the ${isMariaDb ? "10.6" : "8.0"} minimum.`,
           },
-          { Name: "tls", Passed: true, Detail: "TLS negotiated (TLS_AES_256_GCM_SHA384)." },
-          { Name: "privileges.create-database", Passed: true, Detail: "Login can create databases." },
-          { Name: "privileges.create-user", Passed: true, Detail: "Login can create users." },
-          { Name: "privileges.grant-option", Passed: true, Detail: "Login holds GRANT OPTION." },
+          {
+            Name: "tls",
+            Passed: true,
+            Detail: "TLS negotiated (TLS_AES_256_GCM_SHA384).",
+          },
+          {
+            Name: "privileges.create-database",
+            Passed: true,
+            Detail: "Login can create databases.",
+          },
+          {
+            Name: "privileges.create-user",
+            Passed: true,
+            Detail: "Login can create users.",
+          },
+          {
+            Name: "privileges.grant-option",
+            Passed: true,
+            Detail: "Login holds GRANT OPTION.",
+          },
         ],
       });
     },
@@ -550,6 +794,7 @@ const ROUTES: Route[] = [
         DatabaseName: req.DatabaseName,
         Description: req.Description,
         CrystalPmId: req.CrystalPmId,
+        Status: "active",
       };
       demoStore.databases.push(next);
       demoStore.recordAdminEvent(`Created database ${next.DatabaseName}`);

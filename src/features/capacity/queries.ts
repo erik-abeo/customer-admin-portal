@@ -5,6 +5,8 @@ import { capacityApi } from "@/api/capacity";
 const KEYS = {
   fleet: ["server-capacity"] as const,
   server: (id: number) => ["server-capacity", id] as const,
+  history: (id: number, days: number) =>
+    ["server-capacity", id, "history", days] as const,
 };
 
 /**
@@ -27,6 +29,19 @@ export function useServerCapacity(id: number | undefined) {
     queryFn: () => capacityApi.server(id as number),
     enabled: id !== undefined,
     staleTime: STALE_MS,
+  });
+}
+
+/**
+ * A server's recorded trend. Snapshots are taken hourly, so five minutes stale
+ * loses nothing.
+ */
+export function useServerCapacityHistory(id: number | undefined, days: number) {
+  return useQuery({
+    queryKey: id ? KEYS.history(id, days) : ["server-capacity", "history", "disabled"],
+    queryFn: () => capacityApi.history(id as number, days),
+    enabled: id !== undefined,
+    staleTime: 5 * 60_000,
   });
 }
 

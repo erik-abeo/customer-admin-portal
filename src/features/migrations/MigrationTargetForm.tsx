@@ -17,12 +17,14 @@ import {
   IconUser,
 } from "@tabler/icons-react";
 
+import { getAdminName } from "@/api/httpClient";
 import type {
   CreateMigrationSessionRequest,
   DatabaseInfoItem,
   DatabaseServerInfoItem,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import { whyDatabaseUnavailable } from "@/features/databases/status";
 import {
   DEFAULT_EXPIRY_MINUTES,
   describeTarget,
@@ -87,7 +89,8 @@ export function MigrationTargetForm({
       CrystalPmId: (value) => {
         const parsed = Number(value);
         if (!value && value !== 0) return "Enter the CrystalPM customer id";
-        if (!Number.isInteger(parsed) || parsed < 1) return "Must be a positive whole number";
+        if (!Number.isInteger(parsed) || parsed < 1)
+          return "Must be a positive whole number";
         return null;
       },
     },
@@ -101,7 +104,10 @@ export function MigrationTargetForm({
   const visibleDatabases = visibleDatabasesFor(databases, selectedServerId);
 
   const submit = form.onSubmit((values) => {
-    onSubmit(toCreateRequest(values), describeTarget(values, servers, databases));
+    onSubmit(
+      toCreateRequest(values, getAdminName()),
+      describeTarget(values, servers, databases),
+    );
   });
 
   return (
@@ -154,7 +160,9 @@ export function MigrationTargetForm({
             onChange={(value) => {
               // Delegates so the rule that clears the database lives in one
               // tested place rather than in this handler.
-              form.setValues((current) => selectServer(current as MigrationTargetSelection, value));
+              form.setValues((current) =>
+                selectServer(current as MigrationTargetSelection, value),
+              );
             }}
           />
 
@@ -176,10 +184,20 @@ export function MigrationTargetForm({
               searchable
               disabled={!selectedServerId}
               leftSection={<IconDatabase size={14} />}
-              data={visibleDatabases.map((d) => ({
-                value: String(d.Id),
-                label: `${d.DatabaseName}${d.CrystalPmId ? ` (CPM #${d.CrystalPmId})` : ""}`,
-              }))}
+              description="Only an active database can be migrated into."
+              data={visibleDatabases.map((d) => {
+                // Offered but disabled, with the reason, rather than hidden: a
+                // customer's database vanishing from the list would look like it
+                // did not exist. The service refuses these too.
+                const unavailable = whyDatabaseUnavailable(d.Status);
+                return {
+                  value: String(d.Id),
+                  label: `${d.DatabaseName}${d.CrystalPmId ? ` (CPM #${d.CrystalPmId})` : ""}${
+                    unavailable ? `, unavailable: ${unavailable}` : ""
+                  }`,
+                  disabled: unavailable !== null,
+                };
+              })}
               {...form.getInputProps("DatabaseId")}
             />
           ) : (

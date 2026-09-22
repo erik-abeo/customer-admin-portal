@@ -3,9 +3,11 @@
  * cni.libs.ClientRemoteDatabaseAccessAPI and ASP.NET
  * ClientRemoteDatabaseAccessAPI.Models.SupertokensService.
  *
- * The ASP.NET service uses default System.Text.Json serialization, which
- * preserves PascalCase property names by default for these projects. Property
- * names below match the wire format exactly to avoid mapping bugs.
+ * The ASP.NET service configures System.Text.Json with no naming policy, so
+ * property names are PascalCase on the wire; the default would be camelCase.
+ * Names below match the wire format exactly to avoid mapping bugs. Every
+ * DateTime is sent as UTC ISO 8601 with a trailing `Z`, so `new Date(value)`
+ * reads it correctly in any time zone.
  */
 
 export interface DatabaseMapping {
@@ -47,7 +49,12 @@ export interface CreateDatabaseServerInfoRequest {
   ServerPort: number;
   AdminUserName: string;
   RootUserPassword: string;
-  Certificate: string | null;
+  /**
+   * The CA the server's TLS certificate is issued under. Required: the service
+   * refuses to register a server without one, because it verifies the server
+   * against it and hands it to the installer so the installer can too.
+   */
+  Certificate: string;
   SecurityGroupId: string | null;
 }
 
@@ -122,6 +129,12 @@ export interface ProbeDatabaseServerResponse {
   TlsInUse: boolean;
   CanCreateDatabase: boolean;
   CanCreateUser: boolean;
+  /**
+   * Holds `GRANT OPTION`, without which the service cannot give a migration
+   * login access to the schema it provisions.
+   */
+  CanGrant: boolean;
+  /** Every gate passed, `CanGrant` included. */
   IsSupported: boolean;
   Checks: DatabaseServerProbeCheck[];
 }
@@ -129,21 +142,22 @@ export interface ProbeDatabaseServerResponse {
 // ---------- Customer moves ----------
 
 /**
- * `planned` -> `quiescing` -> `draining` -> `copying` -> `verifying` ->
- * `flipped` -> `settled`, plus `failed` and `rolled_back`.
+ * `planned` -> `draining` -> `copying` -> `verifying` -> `flipped` ->
+ * `settled`, plus `failed`, `cancelled` and `rolled_back`.
  *
- * `flipped` means the customer is on the target and the source is retained.
- * `settled` means the source has been dropped, which is the point of no return.
+ * `planned` and `draining` can be cancelled. `flipped` means the customer is on
+ * the target and the source is retained. `settled` means the source has been
+ * dropped, which is the point of no return.
  */
 export type CustomerMoveStatus =
   | "planned"
-  | "quiescing"
   | "draining"
   | "copying"
   | "verifying"
   | "flipped"
   | "settled"
   | "failed"
+  | "cancelled"
   | "rolled_back";
 
 export interface CustomerMove {
@@ -156,7 +170,8 @@ export interface CustomerMove {
   TargetDatabaseServerName: string | null;
   TargetDatabaseName: string | null;
   SourceDatabaseName: string | null;
-  Status: CustomerMoveStatus | string;
+  /** Nullable on the wire, like every string the service returns. */
+  Status: CustomerMoveStatus | string | null;
   /** What the current phase is doing, in the operator's terms. */
   PhaseDetail: string | null;
   RequestedByAdmin: string | null;
@@ -181,8 +196,10 @@ export interface CustomerMoveVerification {
   SourceChecksum: number | null;
   TargetChecksum: number | null;
   /**
-   * `checksum` or `row_count`. Not equivalent: matching row counts say nothing
-   * about the values in them. Show which one a move actually got.
+   * `checksum` or `row_count`, per table: a table whose checksum could not be
+   * compared is recorded as `row_count`. Not equivalent, since matching row
+   * counts say nothing about the values in them, so show which one each table
+   * actually got.
    */
   VerificationMethod: string | null;
   Matched: boolean;
@@ -287,6 +304,32 @@ export interface GetFleetCapacityResponse {
   Servers: ServerCapacity[];
 }
 
+/**
+ * One recorded measurement of a server, taken by the service's collector.
+ * Every figure is nullable: a column added after a snapshot was taken has no
+ * value for it.
+ */
+export interface ServerMetricsPoint {
+  /** UTC, ISO 8601 with a trailing `Z`. */
+  UtcTimestamp: string;
+  CustomerDatabaseCount: number | null;
+  AuthorizedUserCount: number | null;
+  DataBytes: number | null;
+  IndexBytes: number | null;
+  ApproxRowCount: number | null;
+  DatabaseConnections: number | null;
+}
+
+export interface GetServerCapacityHistoryResponse {
+  Success: boolean;
+  Message: string | null;
+  DatabaseServerId: number;
+  /** The window actually returned, after the service clamps it to 1..400. */
+  Days: number;
+  /** Oldest first. Unreachable servers are not recorded, so gaps are real. */
+  Points: ServerMetricsPoint[];
+}
+
 // ---------- Migration sessions ----------
 
 /**
@@ -315,7 +358,11 @@ export interface CreateMigrationSessionResponse {
    * revoking this session and minting another.
    */
   MigrationKey: string | null;
-  /** Leading group of the key, safe to show in a list afterwards. */
+  /**
+   * Leading group of the key, safe to show in a list afterwards. Keys look like
+   * `CPM-7K4D-9QX2-8M3T-4HZW`, so this is `7K4D`: 20 of the key's 80 bits,
+   * leaving 60 secret.
+   */
   MigrationKeyPrefix: string | null;
   ExpiresUtc: string;
   /**
@@ -342,10 +389,17 @@ export interface MigrationSessionItem {
   DatabaseServerName: string | null;
   DatabaseId: number | null;
   DatabaseName: string | null;
-  /** Schema name still to be created, for a key minted against a new database. */
+  /** Schema name the key will create, for a key minted against a new database. */
   ProvisionDatabaseName: string | null;
+  /**
+   * The session created `DatabaseId` itself, as opposed to streaming into one
+   * that already existed. Only a database this session created can be
+   * discarded.
+   */
+  DatabaseCreated: boolean;
   CrystalPmId: number;
-  Status: MigrationSessionStatus | string;
+  /** Nullable on the wire, like every string the service returns. */
+  Status: MigrationSessionStatus | string | null;
   Phase: string | null;
   CreatedByAdmin: string | null;
   CreatedDateTimeUtc: string;
@@ -394,6 +448,12 @@ export interface DatabaseInfoItem {
   DatabaseName: string;
   Description: string | null;
   CrystalPmId: number;
+  /**
+   * `active`, `moving`, `suspended` or `retired`. Only an active database can
+   * be migrated into or moved; the service refuses the rest. Null only
+   * defensively: the service always sends one.
+   */
+  Status: string | null;
 }
 
 export interface CreateDatabaseInfoRequest {

@@ -100,6 +100,7 @@ server itself; the version banner is only used for the version number.
   "TlsInUse": true,            // TLS actually negotiated, not merely requested
   "CanCreateDatabase": true,
   "CanCreateUser": true,
+  "CanGrant": true,            // holds GRANT OPTION; required
   "IsSupported": true,         // gate registration on THIS, not on Success
   "Checks": [
     { "Name": "connect", "Passed": true, "Detail": "Connected to …:3306." },
@@ -112,6 +113,11 @@ server itself; the version banner is only used for the version number.
   ],
 }
 ```
+
+`IsSupported` requires every gate, `CanGrant` included: without `GRANT OPTION`
+the service cannot give a migration login access to the schema it provisions,
+so a server whose login lacks it is refused at registration rather than at the
+first redemption.
 
 `Success: false` means the probe could not run at all, typically an unreachable
 host or a bad password, and `Checks` will hold a single failed `connect` entry.
@@ -136,10 +142,9 @@ The register-a-server form therefore needs an admin username field alongside the
 password, defaulting to `root`, and the value it collects is what
 `/My/probe-database-server` should be given as `User`.
 
-> **Known drift:** the TypeScript `DatabaseServerInfoItem` in
-> [`src/api/types.ts`](./src/api/types.ts) is missing both `AdminUserName` and
-> `SecurityGroupId`, which the backend has returned for some time. Both need
-> adding when the server form is next touched.
+`Certificate` is **required** on `CreateDatabaseServerInfoRequest`: the service
+verifies the server against it and hands it to the installer with a migration
+key's credentials. On update it is optional, and blank keeps the stored one.
 
 ### 1.3 Database mappings must name the right server
 
@@ -155,12 +160,28 @@ record, so this should never fire in normal use. It exists so that a caller
 holding a stale idea of where a customer lives finds out immediately instead of
 silently creating a user who cannot reach their database.
 
-### 1.4 Server capacity and placement
+### 1.4 Databases carry a status
+
+`DatabaseInfoItem` has a **`Status`**: `active`, `moving`, `suspended` or
+`retired`. It is returned by `get-all-database-info`, the by-server and
+by-CrystalPM-id lists, and `get-database-info`, and is set by the service rather
+than by the create and update requests. `moving` is set while a customer move
+holds the database, `suspended` by an operator, and `retired` by hand once a
+database is out of service.
+
+Only an `active` database can be migrated into or moved. The service refuses the
+rest, with a `Message` naming the status. The UI shows the status wherever a
+database is listed, and offers the others in the migration and move pickers
+disabled, with the reason, so an operator sees why before submitting. The
+refusal stays the backstop for a status that changed after the list was loaded.
+
+### 1.5 Server capacity and placement
 
 | Method | URL | Response |
 | ------ | --- | -------- |
 | GET | `/My/get-fleet-capacity` | `GetFleetCapacityResponse` |
 | GET | `/My/get-server-capacity/{id}` | `GetServerCapacityResponse` |
+| GET | `/My/get-server-capacity-history/{id}?days=90` | `GetServerCapacityHistoryResponse` |
 
 Measured live on each call rather than served from a cache. Three sources: the
 authorization database for who is registered where, the server's own
@@ -189,10 +210,19 @@ same as unlimited room, and a server without one should not win a comparison
 against a server that has thought about its limits.
 
 A background collector writes these into `server_metrics_snapshot` hourly and
-keeps 400 days, so trend is available later even though no endpoint serves it
-yet.
+keeps 400 days. `get-server-capacity-history` serves the server-level rows:
+`days` is clamped to 1..400 and defaults to 90, and the response carries the
+window actually used as `Days` plus `Points`, oldest first. Each point has
+`UtcTimestamp`, `CustomerDatabaseCount`, `AuthorizedUserCount`, `DataBytes`,
+`IndexBytes`, `ApproxRowCount` and `DatabaseConnections`, every figure nullable.
+An unreachable server is not recorded, so a gap in the points is a real gap and
+must not be drawn as zero. Unlike the calls above it reads stored rows rather
+than measuring, so it is cheap. An id that is not a server answers **404** with
+`Success: false` and a `Message`, as `get-server-capacity/{id}` does; a server
+that exists but has no snapshots in the window answers 200 with an empty
+`Points`.
 
-### 1.5 Customer moves
+### 1.6 Customer moves
 
 Moving a customer's database from one server to another.
 
@@ -201,29 +231,44 @@ Moving a customer's database from one server to another.
 | POST | `/My/create-customer-move` | `CreateCustomerMoveRequest` | `CustomerMoveResult` |
 | GET | `/My/get-customer-moves` | — | `GetCustomerMovesResponse` |
 | GET | `/My/get-customer-move/{id}` | — | `GetCustomerMoveResponse` |
+| POST | `/My/cancel-customer-move/{id}` | — | `CustomerMoveResult` |
 | POST | `/My/roll-back-customer-move/{id}` | — | `CustomerMoveResult` |
 | POST | `/My/drop-customer-move-source/{id}` | — | `CustomerMoveResult` |
 
 These record intent. The work runs in a background executor, so the portal plans
-a move and then watches it: `planned` to `quiescing` to `draining` to `copying`
-to `verifying` to `flipped`, plus `failed` and `rolled_back`, and `settled` once
-the source is dropped.
+a move and then watches it: `planned` to `draining` to `copying` to `verifying`
+to `flipped`, plus `failed`, `cancelled` and `rolled_back`, and `settled` once
+the source is dropped. `CreateCustomerMoveRequest` is `DatabaseId`,
+`TargetDatabaseServerId`, `TargetDatabaseName` (null keeps the source's name)
+and `RequestedByAdmin`; there is no disconnect option.
 
-**The customer is offline during `quiescing`, `draining`, `copying` and
-`verifying`.** Surface that in the list, not only in a detail view. A move in
-`copying` means a practice cannot open CrystalPM, and whoever is looking at the
-page should not have to click to find that out.
+**The customer cannot start new sessions from `draining` until the move
+finishes, and is offline outright during `copying` and `verifying`.** Planning
+reserves the target name and marks the database `moving`, and draining waits for
+open sessions to end on their own. Surface that in the list, not only in a
+detail view. A move in `copying` means a practice cannot open CrystalPM, and
+whoever is looking at the page should not have to click to find that out.
+
+**Cancelling** is for `planned` and `draining` only, the way out of a drain that
+never finishes. It puts the database back to `active` and releases the reserved
+target name. Any later status answers `Success: false` with the reason: a move
+that is copying or verifying either cuts over or fails by itself, and either way
+the customer is put back online.
 
 `flipped` means cut over **with the source retained**. Rolling back is a single
 row update while that is true, which is why dropping the source is a separate
 action and the only irreversible one. Offer `roll-back` and `drop-source` only
-for `flipped` with `SourceDroppedDateTimeUtc` null.
+for `flipped` with `SourceDroppedDateTimeUtc` null. Rolling back points the
+customer at the source as it was at cutover: anything written on the target
+since then stays on the target and is not carried back, and the UI should say
+so before the operator confirms.
 
 `Verification` on the detail response is per table and carries
-`VerificationMethod`, either `checksum` or `row_count`. **These are not
-equivalent** and the UI should say which one a move got: matching row counts say
-nothing about the values in them. A mismatch fails the move before anything cuts
-over, and the customer is put back on the source.
+`VerificationMethod`, either `checksum` or `row_count`, recorded per table:
+`checksum` only where the checksums were actually compared. **These are not
+equivalent** and the UI should say which one each table got: matching row
+counts say nothing about the values in them. A mismatch fails the move before
+anything cuts over, and the customer is put back on the source.
 
 **Moves between engines are refused.** MySQL to MariaDB, or the reverse, is a
 schema conversion, which is what a migration key and the installer are for. The
@@ -234,7 +279,11 @@ already in flight.
 
 `create-customer-move` answers 400 with a `Message` for:
 
-* a customer that already has a move in flight;
+* a database that is not `active`, for example suspended or already moving;
+* a database that static database users hold privileges on, since moves do not
+  carry static users yet;
+* a customer that already has a move in flight, or one that has cut over and
+  not been settled or rolled back;
 * a target server the customer is already on;
 * a target database name that is already registered on the target server, for
   any customer;
@@ -244,14 +293,17 @@ already in flight.
 Planning then checks the live target as well, and fails the move without
 quiescing anyone if a schema of that name already exists there, registered or
 not. The copy replaces tables by name, so a schema it did not make is never its
-to fill.
+to fill. Once the checks pass it creates the target schema empty, which is the
+reservation, before anyone is quiesced. The flip is conditional on the
+database's registration still naming the source, so a move whose customer was
+repointed by hand while it ran fails rather than overwriting that change.
 
 `SourceDatabaseName` is recorded when the move is planned and does not change.
 Before, it was read through `database_info`, which the flip rewrites, so after a
 flip it reported the target's name; rollback and drop-source now use the
 recorded name.
 
-### 1.6 Migration sessions
+### 1.7 Migration sessions
 
 The streaming-migration flow. The portal mints a key for one customer's move and
 shows it once; the operator pastes it into the MariaDB installer, which redeems
@@ -275,17 +327,26 @@ machine on an office network which has no business holding the admin key.
 different things to a customer's data. An existing database must be on the named
 server and must already belong to the named customer.
 
-A name to provision is also a 400 when it is already registered on that server to
-a different customer, and when this customer already has a database on that
-server under another name, since provisioning would reuse that one rather than
-make what was asked for. Every CrystalPM source database has the same name, so
-the default is taken on any server that already has a customer: propose
-something unique, such as the name plus the CrystalPM id.
+A name to provision is also a 400 when this customer already has any database on
+that server (select it as the existing database instead), when the name is
+already registered on that server, and when a customer move is copying into a
+database of that name there. Provisioning only ever creates: it never adopts a
+database that already exists, because a failed migration's target may later be
+discarded, and that is only safe for one the migration made. Every CrystalPM
+source database has the same name, so the default is taken on any server that
+already has a customer: propose something unique, such as the name plus the
+CrystalPM id.
+
+An existing database is also a 400 when it is not `active` or has a customer
+move in progress. Redemption checks both again, along with the server and the
+owner, since minting may have been hours earlier.
 
 **The key as typed.** Redemption accepts the key with or without its `CPM-`
 label, in any case, with dashes, spaces or nothing between the groups, and with
-`I`, `L` and `O` read as `1`, `1` and `0`. Show it as `CPM-XXXX-XXXX-XXXX`; the
-operator does not need to be told any of this.
+`I`, `L` and `O` read as `1`, `1` and `0`. Show it as `CPM-XXXX-XXXX-XXXX-XXXX`:
+four groups of Crockford base32, 80 bits. `MigrationKeyPrefix` is the first
+group, 20 of those bits, and is safe to list afterwards; describe it as the key
+*starting* with it. The operator does not need to be told any of this.
 
 ```jsonc
 // CreateMigrationSessionRequest
@@ -302,7 +363,7 @@ operator does not need to be told any of this.
 {
   "Success": true,
   "SessionId": 17,
-  "MigrationKey": "CPM-7K4D-9QX2-8M3T",   // SHOWN ONCE. Never retrievable again.
+  "MigrationKey": "CPM-7K4D-9QX2-8M3T-4HZW",   // SHOWN ONCE. Never retrievable again.
   "MigrationKeyPrefix": "7K4D",
   "ExpiresUtc": "2026-09-22T19:04:11Z",
   "TargetSummary": "Customer 1042 into 'easyopti_1042' on server 3.",
@@ -314,7 +375,9 @@ Two things the UI must get right:
 **`MigrationKey` is shown once.** Only its hash is stored, so it cannot be read
 back. Reuse the reveal-once pattern from `StaticUsersPage.tsx` with a copy
 button, and do not let the modal close without the operator having had a chance
-to copy it. Losing it means minting another and revoking this one.
+to copy it: no close button, no Escape, no click outside. Losing it means
+minting another and revoking this one. Record the signed-in operator as
+`CreatedByAdmin`.
 
 **`TargetSummary` is the confirmation text.** It names the customer and
 destination, and appends a warning when that customer already has a database on
@@ -326,15 +389,20 @@ looks like. Show it in the confirm step, not after.
 plus `expired` and `revoked`. `get-migration-sessions` sweeps expiries before
 returning, so the list does not show dead keys as pending.
 
+Each session carries `DatabaseCreated`: true once redemption has created the
+database this session streams into, as opposed to one that already existed.
+
 `get-migration-session/{id}` returns the session plus a `Progress` array
 (`Phase`, `TableName`, `RowsDone`, `RowsTotal`, `BytesDone`, `Message`,
 `IsError`, `UtcTimestamp`), oldest first. A migration that dies partway reports
 where it got to; surface the last non-null `Phase` and `TableName` rather than
 only that it failed.
 
-**Revoking** is how a key minted for the wrong customer is undone. A session that
-already finished returns `Success: false` with a message rather than being
-rewritten.
+**Revoking** is how a key minted for the wrong customer is undone. For a key
+already redeemed it also drops the installer's database login and ends its
+connections, so a running stream stops there and then; whatever it had written
+stays in the target until that is discarded. A session that already finished
+returns `Success: false` with a message rather than being rewritten.
 
 **Discarding a failed target** is `POST /My/discard-migration-target/{id}`. A
 failed migration leaves its destination exactly as it was, half imported, on
@@ -343,26 +411,34 @@ at the moment somebody most needs it.
 
 The backend refuses unless the session finished unsuccessfully **and** created
 that database itself. A migration aimed at a database that already existed can
-never drop it. The UI should only surface the action when
-`ProvisionDatabaseName` is set and the status is `failed`, `revoked` or
+never drop it. The UI should only surface the action when `DatabaseCreated` is
+true, `DatabaseId` is not null and the status is `failed`, `revoked` or
 `expired`, so the destructive button is absent rather than present-and-refused.
 
 It also refuses, with `Success: false` and a message naming why, when:
 
-* another session streamed into the same database and did not fail. Provisioning
-  is idempotent on the customer, so a key minted to retry lands in the first
-  attempt's database; once that retry succeeds, the database is the customer's;
-* any authorized user is mapped to the database, or any move refers to it.
+* another session streamed into the same database and did not fail. A retry is
+  minted against the first attempt's database as an existing one; once that
+  retry succeeds, or while it runs, the database is the customer's;
+* any authorized user is mapped to the database, any static user holds
+  privileges on it, or any move refers to it.
 
 Dropping detaches the sessions that pointed at the database rather than deleting
 them, so the history survives. A second discard of the same session answers
 `Success: true` with "already been dropped".
 
-**Redemption can answer 409.** A good key whose destination turned out to be
-taken, because a schema of that name appeared on the server after minting, is
-refused with 409 and a `Message` saying what is in the way. The key stays
-`pending` and redeems normally once the conflict is cleared. Every other refusal
-is 401 with one deliberately uninformative message.
+**Redemption can answer 409.** A good key whose destination is no longer
+usable is refused with 409 and a `Message` saying what is in the way: a schema of
+that name appeared on the server after minting, or the existing database it was
+minted against has since moved, changed owner, stopped being `active` or started
+a move. The key stays `pending` and redeems normally once the conflict is
+cleared. Every other refusal is 401 with one deliberately uninformative message.
+
+**Redemption returns the server's CA.** When the server was registered with a
+certificate, the credentials carry it as `CertificatePem` with `SslMode`
+`VerifyCA`, and the installer verifies the server against it; otherwise
+`SslMode` is `Required`. This is the installer's concern, but it is why the
+certificate is required at registration.
 
 **Abandoned sessions close themselves.** The service sweeps every five minutes
 and fails any session that has not reported for fifteen, dropping the temporary
@@ -377,6 +453,7 @@ The UI's behavior on common error codes:
 | 401    | Global handler clears credentials and routes the user back to `/login`.                     |
 | 403    | Notification: "Forbidden — your account does not have access".                              |
 | 404    | Page-level empty state where applicable; otherwise a contextual error toast.                |
+| 400    | Notification with the body's `Message` when present (refused mints and moves say why).      |
 | 409    | Notification with the body's `Message` when present.                                        |
 | 5xx    | Notification: "Service error — please try again", with `Retry-After` honored where present. |
 

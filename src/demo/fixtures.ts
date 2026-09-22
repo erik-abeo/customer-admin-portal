@@ -77,6 +77,7 @@ export const seedDatabases: DatabaseInfoItem[] = [
     DatabaseName: "tenant_acme",
     Description: "Acme Eyecare — 4 locations",
     CrystalPmId: 11111,
+    Status: "active",
   },
   {
     Id: 101,
@@ -84,6 +85,7 @@ export const seedDatabases: DatabaseInfoItem[] = [
     DatabaseName: "tenant_globex",
     Description: "Globex Optical — single location",
     CrystalPmId: 22222,
+    Status: "active",
   },
   {
     Id: 102,
@@ -91,6 +93,7 @@ export const seedDatabases: DatabaseInfoItem[] = [
     DatabaseName: "tenant_initech",
     Description: "Initech Vision Group",
     CrystalPmId: 33333,
+    Status: "active",
   },
   {
     Id: 103,
@@ -98,6 +101,7 @@ export const seedDatabases: DatabaseInfoItem[] = [
     DatabaseName: "tenant_umbrella",
     Description: "Umbrella Eyecare — newly onboarded",
     CrystalPmId: 44444,
+    Status: "active",
   },
   {
     Id: 104,
@@ -105,13 +109,15 @@ export const seedDatabases: DatabaseInfoItem[] = [
     DatabaseName: "tenant_wayne",
     Description: "Wayne Optical — multi-doctor practice",
     CrystalPmId: 55555,
+    Status: "active",
   },
   {
     Id: 105,
     DatabaseServerId: 3,
     DatabaseName: "tenant_stark",
-    Description: "Stark Vision Center",
+    Description: "Stark Vision Center — suspended for non-payment",
     CrystalPmId: 66666,
+    Status: "suspended",
   },
 ];
 
@@ -363,6 +369,7 @@ export const seedMigrationSessions: MigrationSessionItem[] = [
     DatabaseId: null,
     DatabaseName: null,
     ProvisionDatabaseName: "easyopti_1042",
+    DatabaseCreated: false,
     CrystalPmId: 1042,
     Status: "pending",
     Phase: null,
@@ -386,6 +393,7 @@ export const seedMigrationSessions: MigrationSessionItem[] = [
     DatabaseId: 201,
     DatabaseName: "easyopti_0887",
     ProvisionDatabaseName: null,
+    DatabaseCreated: false,
     CrystalPmId: 887,
     Status: "streaming",
     Phase: "Migrate all tables",
@@ -408,7 +416,8 @@ export const seedMigrationSessions: MigrationSessionItem[] = [
     DatabaseServerName: "us-east-prod-01",
     DatabaseId: 202,
     DatabaseName: "easyopti_0319",
-    ProvisionDatabaseName: null,
+    ProvisionDatabaseName: "easyopti_0319",
+    DatabaseCreated: true,
     CrystalPmId: 319,
     Status: "failed",
     Phase: "Migrate all tables",

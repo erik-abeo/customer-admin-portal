@@ -150,6 +150,26 @@ function captureRoleHeader(headers: Record<string, unknown> | undefined): void {
   }
 }
 
+/**
+ * The explanation in an error body, if it has one.
+ *
+ * The service serializes PascalCase, so its refusals carry `Message`: a 409
+ * saying why a key's destination is taken, a 400 saying why a move was
+ * refused. Those are the sentences an operator needs, and falling back to
+ * axios's "Request failed with status code 409" would throw them away.
+ * `message` is kept for anything camelCase in front of the service, and
+ * `title` is what ASP.NET's own validation problem details use.
+ */
+export function messageFromBody(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const body = data as Record<string, unknown>;
+  for (const key of ["Message", "message", "title"]) {
+    const value = body[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
 httpClient.interceptors.response.use(
   (response: AxiosResponse) => {
     captureRoleHeader(response.headers as Record<string, unknown> | undefined);
@@ -171,9 +191,7 @@ httpClient.interceptors.response.use(
     const data = error.response?.data;
     const message =
       (typeof data === "string" && data) ||
-      (typeof data === "object" && data !== null && "message" in data
-        ? String((data as { message: unknown }).message)
-        : undefined) ||
+      messageFromBody(data) ||
       error.message ||
       "Unknown API error";
     const apiError = new ApiError(message, status, data);

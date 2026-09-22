@@ -11,6 +11,7 @@ import {
   Table,
   Text,
   TextInput,
+  VisuallyHidden,
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import {
@@ -22,13 +23,17 @@ import {
 } from "@tabler/icons-react";
 import { useState } from "react";
 
-import type { CustomerMove } from "@/api/types";
+import { getAdminName } from "@/api/httpClient";
+import type { CustomerMove, CustomerMoveVerification } from "@/api/types";
 import { RequireRole } from "@/auth/RequireRole";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { useDatabases } from "@/features/databases/queries";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
+import { whyDatabaseUnavailable } from "@/features/databases/status";
 import {
+  canCancelMove,
+  useCancelCustomerMove,
   useCreateCustomerMove,
   useCustomerMove,
   useCustomerMoves,
@@ -39,18 +44,34 @@ import { notifyError, notifySuccess } from "@/lib/notify";
 
 const STATUS_COLOR: Record<string, string> = {
   planned: "blue",
-  quiescing: "cyan",
   draining: "cyan",
   copying: "indigo",
   verifying: "violet",
   flipped: "teal",
   settled: "green",
   failed: "red",
+  cancelled: "gray",
   rolled_back: "orange",
 };
 
 /** Phases during which the customer cannot start new sessions. */
-const QUIESCED: Set<string> = new Set(["quiescing", "draining", "copying", "verifying"]);
+const QUIESCED: Set<string> = new Set(["draining", "copying", "verifying"]);
+
+const statusLabel = (status: string | null) =>
+  status ? status.replace("_", " ") : "unknown";
+
+/**
+ * How a move's copy was checked, in words. Recorded per table: a table whose
+ * checksum could not be compared falls back to row counts, and matching counts
+ * say nothing about the values in them, so a partial fallback is worth saying.
+ */
+const describeVerification = (rows: CustomerMoveVerification[]) => {
+  const byCount = rows.filter((row) => row.VerificationMethod !== "checksum").length;
+  if (byCount === 0) return "by table checksum";
+  if (byCount === rows.length)
+    return "by row count only, so the values themselves were not compared";
+  return `by table checksum, except ${byCount} of ${rows.length} tables checked by row count only`;
+};
 
 const formatUtc = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString() : "—";
@@ -68,6 +89,7 @@ export function MovesPage() {
   const databases = useDatabases();
 
   const createMove = useCreateCustomerMove();
+  const cancelMove = useCancelCustomerMove();
   const rollBack = useRollBackCustomerMove();
   const dropSource = useDropCustomerMoveSource();
 
@@ -100,7 +122,7 @@ export function MovesPage() {
         DatabaseId: Number(databaseId),
         TargetDatabaseServerId: Number(targetServerId),
         TargetDatabaseName: targetName.trim() || null,
-        RequestedByAdmin: null,
+        RequestedByAdmin: getAdminName(),
       });
 
       if (!result.Success) {
@@ -116,6 +138,67 @@ export function MovesPage() {
     }
   };
 
+  /**
+   * Stated back in words before anything is recorded. Planning a move is what
+   * starts taking the customer offline, and the executor picks it up within
+   * seconds, so the confirmation is the last point at which a wrong pick costs
+   * nothing.
+   */
+  const confirmPlan = () => {
+    const targetServer = (servers.data ?? []).find(
+      (s) => String(s.Id) === targetServerId,
+    );
+    const sourceServer = (servers.data ?? []).find(
+      (s) => s.Id === selectedDatabase?.DatabaseServerId,
+    );
+    const name = targetName.trim() || selectedDatabase?.DatabaseName;
+
+    modals.openConfirmModal({
+      title: "Start moving this customer?",
+      children: (
+        <Stack gap="xs">
+          <Text size="sm">
+            Customer <b>{selectedDatabase?.CrystalPmId}</b> moves from{" "}
+            <b>{sourceServer?.Name ?? "their current server"}</b> to{" "}
+            <b>{targetServer?.Name}</b>, as <Code>{name}</Code>.
+          </Text>
+          <Text size="sm">
+            New sessions are refused from now on. Once the open ones end, the practice
+            cannot use CrystalPM until the copy is verified and cut over. Until copying
+            starts, the move can be cancelled.
+          </Text>
+        </Stack>
+      ),
+      labels: { confirm: "Start the move", cancel: "Go back" },
+      confirmProps: { color: "yellow" },
+      onConfirm: () => void planMove(),
+    });
+  };
+
+  const confirmCancel = (move: CustomerMove) =>
+    modals.openConfirmModal({
+      title: "Cancel this move?",
+      children: (
+        <Text size="sm">
+          Customer <b>{move.CrystalPmId}</b> is put back online on{" "}
+          <b>{move.SourceDatabaseServerName}</b>, exactly as before. Nothing has been
+          copied yet, and any name reserved for it on {move.TargetDatabaseServerName} is
+          released.
+        </Text>
+      ),
+      labels: { confirm: "Cancel the move", cancel: "Keep going" },
+      confirmProps: { color: "orange" },
+      onConfirm: async () => {
+        try {
+          const result = await cancelMove.mutateAsync(move.Id);
+          if (result.Success) notifySuccess(result.Message ?? "Move cancelled.");
+          else notifyError(new Error(result.Message ?? "Could not cancel the move"));
+        } catch (error) {
+          notifyError(error);
+        }
+      },
+    });
+
   const confirmRollBack = (move: CustomerMove) =>
     modals.openConfirmModal({
       title: "Point this customer back at the source?",
@@ -124,7 +207,8 @@ export function MovesPage() {
           Customer <b>{move.CrystalPmId}</b> will go back to{" "}
           <Code>{move.SourceDatabaseName}</Code> on{" "}
           <b>{move.SourceDatabaseServerName}</b>, which still holds everything it did
-          before the move. The copy on the target is left in place.
+          before the move. Anything written on the target since the cutover stays there
+          and is not carried back, and the target copy is left in place.
         </Text>
       ),
       labels: { confirm: "Roll back", cancel: "Cancel" },
@@ -150,8 +234,8 @@ export function MovesPage() {
             <b>{move.SourceDatabaseServerName}</b> will be dropped.
           </Text>
           <Text size="sm" fw={500}>
-            Until now this move could be rolled back with a single click. Afterwards
-            the only copy of customer {move.CrystalPmId}&apos;s records is the one on{" "}
+            Until now this move could be rolled back with a single click. Afterwards the
+            only copy of customer {move.CrystalPmId}&apos;s records is the one on{" "}
             {move.TargetDatabaseServerName}.
           </Text>
         </Stack>
@@ -173,14 +257,14 @@ export function MovesPage() {
     <Table.Tr key={move.Id}>
       <Table.Td>
         <Group gap="xs">
-          <Badge variant="light" color={STATUS_COLOR[move.Status] ?? "gray"}>
-            {move.Status.replace("_", " ")}
+          <Badge variant="light" color={STATUS_COLOR[move.Status ?? ""] ?? "gray"}>
+            {statusLabel(move.Status)}
           </Badge>
           {/*
             The thing worth seeing without opening anything: during these phases
             the practice cannot open CrystalPM.
           */}
-          {QUIESCED.has(move.Status) && (
+          {QUIESCED.has(move.Status ?? "") && (
             <Badge variant="filled" color="orange" size="sm">
               Customer offline
             </Badge>
@@ -206,16 +290,33 @@ export function MovesPage() {
       <Table.Td>{formatUtc(move.CreatedDateTimeUtc)}</Table.Td>
       <Table.Td>
         <Group gap="xs" justify="flex-end" wrap="nowrap">
-          <Button size="compact-sm" variant="subtle" onClick={() => setDetailId(move.Id)}>
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            aria-label={`Details of the move for customer ${move.CrystalPmId}`}
+            onClick={() => setDetailId(move.Id)}
+          >
             Details
           </Button>
           <RequireRole role="admin">
+            {canCancelMove(move.Status) && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                color="orange"
+                aria-label={`Cancel the move for customer ${move.CrystalPmId}`}
+                onClick={() => confirmCancel(move)}
+              >
+                Cancel
+              </Button>
+            )}
             {move.Status === "flipped" && !move.SourceDroppedDateTimeUtc && (
               <>
                 <Button
                   size="compact-sm"
                   variant="subtle"
                   color="orange"
+                  aria-label={`Roll back the move for customer ${move.CrystalPmId}`}
                   onClick={() => confirmRollBack(move)}
                 >
                   Roll back
@@ -224,6 +325,7 @@ export function MovesPage() {
                   size="compact-sm"
                   variant="subtle"
                   color="red"
+                  aria-label={`Drop the source of the move for customer ${move.CrystalPmId}`}
                   onClick={() => confirmDropSource(move)}
                 >
                   Drop source
@@ -245,7 +347,10 @@ export function MovesPage() {
         description="Move a customer's database to another server, verified before anything cuts over."
         actions={
           <RequireRole role="admin">
-            <Button leftSection={<IconPlus size={16} />} onClick={() => setFormOpen(true)}>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={() => setFormOpen(true)}
+            >
               Plan a move
             </Button>
           </RequireRole>
@@ -269,7 +374,9 @@ export function MovesPage() {
                 <Table.Th>Move</Table.Th>
                 <Table.Th>Phase</Table.Th>
                 <Table.Th>Planned</Table.Th>
-                <Table.Th />
+                <Table.Th>
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>{rows}</Table.Tbody>
@@ -286,9 +393,10 @@ export function MovesPage() {
         <Stack gap="md">
           <Alert variant="light" color="yellow" icon={<IconAlertTriangle size={16} />}>
             <Text size="sm">
-              The customer stays online until their open sessions end on their own. From
-              then until the copy is verified they cannot use CrystalPM, so this is worth
-              starting when the practice is closed.
+              New sessions are refused as soon as the move starts, and open ones are
+              left to end on their own. From then until the copy is verified the
+              customer cannot use CrystalPM, so this is worth starting when the practice
+              is closed.
             </Text>
           </Alert>
 
@@ -297,10 +405,19 @@ export function MovesPage() {
             placeholder="Pick the database to move"
             required
             searchable
-            data={(databases.data ?? []).map((d) => ({
-              value: String(d.Id),
-              label: `${d.DatabaseName} (CPM #${d.CrystalPmId})`,
-            }))}
+            description="Only an active database can be moved."
+            data={(databases.data ?? []).map((d) => {
+              // Disabled with the reason rather than hidden, so a customer who is
+              // mid-move or suspended is visibly so. The service refuses these too.
+              const unavailable = whyDatabaseUnavailable(d.Status);
+              return {
+                value: String(d.Id),
+                label: `${d.DatabaseName} (CPM #${d.CrystalPmId})${
+                  unavailable ? `, unavailable: ${unavailable}` : ""
+                }`,
+                disabled: unavailable !== null,
+              };
+            })}
             value={databaseId}
             onChange={(value) => {
               setDatabaseId(value ?? "");
@@ -336,7 +453,7 @@ export function MovesPage() {
             <Button
               disabled={!canPlan}
               loading={createMove.isPending}
-              onClick={() => void planMove()}
+              onClick={confirmPlan}
             >
               Plan the move
             </Button>
@@ -354,8 +471,11 @@ export function MovesPage() {
           {detail.data?.Move && (
             <Stack gap="md">
               <Group gap="xs">
-                <Badge variant="light" color={STATUS_COLOR[detail.data.Move.Status] ?? "gray"}>
-                  {detail.data.Move.Status.replace("_", " ")}
+                <Badge
+                  variant="light"
+                  color={STATUS_COLOR[detail.data.Move.Status ?? ""] ?? "gray"}
+                >
+                  {statusLabel(detail.data.Move.Status)}
                 </Badge>
                 <Text size="sm">{detail.data.Move.PhaseDetail}</Text>
               </Group>
@@ -369,8 +489,8 @@ export function MovesPage() {
               {detail.data.Move.Status === "flipped" && (
                 <Alert color="teal" variant="light" icon={<IconCheck size={16} />}>
                   <Text size="sm">
-                    Cut over. The source is still there, so this can be rolled back with a
-                    single click until it is dropped.
+                    Cut over. The source is still there, so this can be rolled back with
+                    a single click until it is dropped.
                   </Text>
                 </Alert>
               )}
@@ -395,14 +515,12 @@ export function MovesPage() {
                     Verification
                     {/*
                       Which check ran is worth stating. Matching row counts say
-                      nothing about the values in them, so a move verified by
+                      nothing about the values in them, so a table verified by
                       count was checked less thoroughly than one by checksum.
                     */}
                     <Text span size="xs" c="dimmed">
                       {" "}
-                      by {detail.data.Verification[0].VerificationMethod === "checksum"
-                        ? "table checksum"
-                        : "row count only, so the values themselves were not compared"}
+                      {describeVerification(detail.data.Verification)}
                     </Text>
                   </Text>
                   <Table.ScrollContainer minWidth={420} mah={320}>
@@ -412,20 +530,40 @@ export function MovesPage() {
                           <Table.Th>Table</Table.Th>
                           <Table.Th>Source</Table.Th>
                           <Table.Th>Target</Table.Th>
-                          <Table.Th />
+                          <Table.Th>Check</Table.Th>
+                          <Table.Th>
+                            <VisuallyHidden>Matched</VisuallyHidden>
+                          </Table.Th>
                         </Table.Tr>
                       </Table.Thead>
                       <Table.Tbody>
                         {detail.data.Verification.map((row) => (
                           <Table.Tr key={row.Id}>
                             <Table.Td>{row.TableName}</Table.Td>
-                            <Table.Td>{row.SourceRowCount?.toLocaleString() ?? "—"}</Table.Td>
-                            <Table.Td>{row.TargetRowCount?.toLocaleString() ?? "—"}</Table.Td>
+                            <Table.Td>
+                              {row.SourceRowCount?.toLocaleString() ?? "—"}
+                            </Table.Td>
+                            <Table.Td>
+                              {row.TargetRowCount?.toLocaleString() ?? "—"}
+                            </Table.Td>
+                            <Table.Td>
+                              {row.VerificationMethod === "checksum"
+                                ? "checksum"
+                                : "row count"}
+                            </Table.Td>
                             <Table.Td>
                               {row.Matched ? (
-                                <IconCheck size={14} color="var(--mantine-color-teal-6)" />
+                                <IconCheck
+                                  size={14}
+                                  color="var(--mantine-color-teal-6)"
+                                  aria-label="Matched"
+                                />
                               ) : (
-                                <IconX size={14} color="var(--mantine-color-red-6)" />
+                                <IconX
+                                  size={14}
+                                  color="var(--mantine-color-red-6)"
+                                  aria-label="Did not match"
+                                />
                               )}
                             </Table.Td>
                           </Table.Tr>

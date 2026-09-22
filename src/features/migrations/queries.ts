@@ -19,7 +19,7 @@ const KEYS = {
 const ACTIVE_POLL_MS = 5_000;
 
 /** A session that is still doing something, and therefore worth polling for. */
-const isActive = (status: string | undefined) =>
+const isActive = (status: string | null | undefined) =>
   status === "pending" || status === "redeemed" || status === "streaming";
 
 export function useMigrationSessions() {

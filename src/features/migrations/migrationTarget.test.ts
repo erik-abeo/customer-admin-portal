@@ -48,6 +48,7 @@ const database = (
   DatabaseName,
   Description: null,
   CrystalPmId,
+  Status: "active",
 });
 
 const servers = [server(1, "us-east-prod-01"), server(2, "us-east-prod-02")];
@@ -137,7 +138,7 @@ describe("describeTarget", () => {
 
 describe("toCreateRequest", () => {
   it("sends the database id and no name when using an existing database", () => {
-    expect(toCreateRequest(baseSelection)).toMatchObject({
+    expect(toCreateRequest(baseSelection, "ops@crystalpm.example")).toMatchObject({
       DatabaseServerId: 1,
       DatabaseId: 10,
       DatabaseName: null,
@@ -145,20 +146,31 @@ describe("toCreateRequest", () => {
     });
   });
 
+  it("records who minted the key", () => {
+    expect(toCreateRequest(baseSelection, "ops@crystalpm.example").CreatedByAdmin).toBe(
+      "ops@crystalpm.example",
+    );
+    expect(toCreateRequest(baseSelection, null).CreatedByAdmin).toBeNull();
+  });
+
   it("sends the name and no id when provisioning", () => {
     expect(
-      toCreateRequest({
-        ...baseSelection,
-        Mode: "provision",
-        DatabaseId: "",
-        DatabaseName: " easyopti_1042 ",
-      }),
+      toCreateRequest(
+        {
+          ...baseSelection,
+          Mode: "provision",
+          DatabaseId: "",
+          DatabaseName: " easyopti_1042 ",
+        },
+        null,
+      ),
     ).toMatchObject({ DatabaseId: null, DatabaseName: "easyopti_1042" });
   });
 
   it("falls back to the default lifetime rather than sending zero", () => {
     expect(
-      toCreateRequest({ ...baseSelection, ExpiresInMinutes: "" }).ExpiresInMinutes,
+      toCreateRequest({ ...baseSelection, ExpiresInMinutes: "" }, null)
+        .ExpiresInMinutes,
     ).toBe(120);
   });
 });

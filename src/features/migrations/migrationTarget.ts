@@ -98,15 +98,18 @@ export const describeTarget = (
  * Converts a completed selection into the request the backend expects.
  *
  * Exactly one of `DatabaseId` and `DatabaseName` is ever set, because the
- * backend rejects a request carrying both or neither.
+ * backend rejects a request carrying both or neither. `createdByAdmin` is the
+ * signed-in operator, recorded against the key so a key minted for the wrong
+ * customer can be traced to whoever minted it.
  */
 export const toCreateRequest = (
   selection: MigrationTargetSelection,
+  createdByAdmin: string | null,
 ): CreateMigrationSessionRequest => ({
   DatabaseServerId: Number(selection.DatabaseServerId),
   DatabaseId: selection.Mode === "existing" ? Number(selection.DatabaseId) : null,
   DatabaseName: selection.Mode === "provision" ? selection.DatabaseName.trim() : null,
   CrystalPmId: Number(selection.CrystalPmId),
-  CreatedByAdmin: null,
+  CreatedByAdmin: createdByAdmin,
   ExpiresInMinutes: Number(selection.ExpiresInMinutes) || DEFAULT_EXPIRY_MINUTES,
 });

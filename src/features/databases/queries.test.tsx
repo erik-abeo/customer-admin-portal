@@ -36,6 +36,7 @@ const sampleItem: DatabaseInfoItem = {
   DatabaseName: "customer_acme",
   Description: "Acme tenant",
   CrystalPmId: 1234,
+  Status: "active",
 };
 
 const okResponse: GetDatabaseInfoResponse = {

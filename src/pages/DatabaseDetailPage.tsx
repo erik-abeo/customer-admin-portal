@@ -19,6 +19,10 @@ import { QueryStatus } from "@/components/common/QueryStatus";
 import { useAuthorizedUsersForDatabase } from "@/features/authorizedUsers/queries";
 import { useDatabaseServer } from "@/features/databaseServers/queries";
 import { useDatabase } from "@/features/databases/queries";
+import {
+  DATABASE_STATUS_COLOR,
+  databaseStatusLabel,
+} from "@/features/databases/status";
 
 interface FactProps {
   label: string;
@@ -107,6 +111,14 @@ export function DatabaseDetailPage() {
                 <Fact label="CrystalPM ID">
                   <Badge variant="light" color="crystal">
                     {database.CrystalPmId}
+                  </Badge>
+                </Fact>
+                <Fact label="Status">
+                  <Badge
+                    variant="light"
+                    color={DATABASE_STATUS_COLOR[database.Status ?? ""] ?? "gray"}
+                  >
+                    {databaseStatusLabel(database.Status)}
                   </Badge>
                 </Fact>
                 <Fact label="Authorized users">

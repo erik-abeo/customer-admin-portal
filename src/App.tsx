@@ -24,7 +24,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/layout/ErrorBoundary";
 import { PageFallback } from "@/components/common/PageFallback";
 import { RootErrorBoundary } from "@/components/layout/RootErrorBoundary";
-import { env } from "@/config/env";
+import { env, features } from "@/config/env";
 import { DemoBanner } from "@/demo/DemoBanner";
 import { installAuditLog } from "@/lib/auditLog";
 import { installAuditSink } from "@/lib/auditSink";
@@ -149,9 +149,16 @@ const router = createBrowserRouter(
         { path: "/authorized-users", element: <AuthorizedUsersPage /> },
         { path: "/static-users", element: <StaticUsersPage /> },
         { path: "/event-log", element: <EventLogPage /> },
-        { path: "/migrations", element: <MigrationsPage /> },
-        { path: "/capacity", element: <CapacityPage /> },
-        { path: "/moves", element: <MovesPage /> },
+        // Registered only behind the flag. Hiding the navigation alone would
+        // leave every page reachable by typing its address, and these pages
+        // mint keys and move customers.
+        ...(features.migrations
+          ? [
+              { path: "/migrations", element: <MigrationsPage /> },
+              { path: "/capacity", element: <CapacityPage /> },
+              { path: "/moves", element: <MovesPage /> },
+            ]
+          : []),
         { path: "*", element: <NotFoundPage /> },
       ],
     },

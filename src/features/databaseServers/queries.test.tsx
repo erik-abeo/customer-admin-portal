@@ -140,6 +140,7 @@ describe("useProbeDatabaseServer", () => {
     TlsInUse: true,
     CanCreateDatabase: true,
     CanCreateUser: true,
+    CanGrant: true,
     IsSupported: false,
     Checks: [
       { Name: "connect", Passed: true, Detail: "Connected to db.example:3306." },
