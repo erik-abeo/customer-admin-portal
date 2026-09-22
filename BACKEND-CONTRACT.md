@@ -111,7 +111,28 @@ An unreachable or unsuitable server is reported in the body, not as a non-2xx.
 Render `Checks` in order as a checklist. A rejected server then says which gate
 it failed rather than only that it was rejected.
 
-### 1.2 Database mappings must name the right server
+### 1.2 Database servers carry an admin login, which is not always `root`
+
+`database_server_info` records an **`AdminUserName`** per server, and it appears
+on `CreateDatabaseServerInfoRequest`, `UpdateDatabaseServerInfoRequest`,
+`DatabaseServerInfoItem` and `GetDatabaseServerInfoResponse`. It defaults to
+`root` when omitted, so nothing that predates it changes behaviour.
+
+It has to be settable. AWS RDS **reserves `root`** and will not create a master
+user with that name, so an RDS server is administered under whatever master
+username it was given. The service previously hardcoded `root`, which meant it
+could not administer an RDS server at all.
+
+The register-a-server form therefore needs an admin username field alongside the
+password, defaulting to `root`, and the value it collects is what
+`/My/probe-database-server` should be given as `User`.
+
+> **Known drift:** the TypeScript `DatabaseServerInfoItem` in
+> [`src/api/types.ts`](./src/api/types.ts) is missing both `AdminUserName` and
+> `SecurityGroupId`, which the backend has returned for some time. Both need
+> adding when the server form is next touched.
+
+### 1.3 Database mappings must name the right server
 
 `CreateUserRequest.DatabaseMappings` and `UpdateUserRequest.DatabaseMappings`
 still carry `DatabaseServerId` alongside `DatabaseId`, and the backend no longer
