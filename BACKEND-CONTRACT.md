@@ -219,6 +219,23 @@ only that it failed.
 already finished returns `Success: false` with a message rather than being
 rewritten.
 
+**Discarding a failed target** is `POST /My/discard-migration-target/{id}`. A
+failed migration leaves its destination exactly as it was, half imported, on
+purpose: dropping it automatically would destroy the evidence of what went wrong
+at the moment somebody most needs it.
+
+The backend refuses unless the session finished unsuccessfully **and** created
+that database itself. A migration aimed at a database that already existed can
+never drop it. The UI should only surface the action when
+`ProvisionDatabaseName` is set and the status is `failed`, `revoked` or
+`expired`, so the destructive button is absent rather than present-and-refused.
+
+**Abandoned sessions close themselves.** The service sweeps every five minutes
+and fails any session that has not reported for fifteen, dropping the temporary
+user it held. The installer sends a keep-alive every minute, so a long step
+still counts as alive; only a machine that has genuinely gone away goes quiet.
+A session may therefore move to `failed` without the portal doing anything.
+
 The UI's behavior on common error codes:
 
 | Status | UI behavior                                                                                 |

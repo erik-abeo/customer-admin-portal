@@ -44,6 +44,23 @@ export const migrationsApi = {
     return data;
   },
 
+  /**
+   * Drops the destination a failed migration left behind.
+   *
+   * The backend refuses unless the session finished unsuccessfully *and* created
+   * that database itself, so a migration aimed at a pre-existing database can
+   * never take it down. Destroys data; there is no undo.
+   */
+  async discardTarget(
+    id: number,
+  ): Promise<{ Success: boolean; Message: string | null }> {
+    const { data } = await httpClient.post<{
+      Success: boolean;
+      Message: string | null;
+    }>(`/discard-migration-target/${id}`);
+    return data;
+  },
+
   /** Stops a key working. How a key minted for the wrong customer is undone. */
   async revoke(id: number): Promise<{ Success: boolean; Message: string | null }> {
     const { data } = await httpClient.post<{

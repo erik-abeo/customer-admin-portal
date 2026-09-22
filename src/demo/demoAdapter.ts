@@ -227,6 +227,33 @@ const ROUTES: Route[] = [
   },
   {
     method: "POST",
+    pattern: /^\/discard-migration-target\/(\d+)$/,
+    handle: ({ params }) => {
+      const id = Number(params[0]);
+      const session = demoStore.migrationSessions.find((m) => m.Id === id);
+      if (!session) return notFound(`Migration session ${id} not found`);
+      if (!["failed", "revoked", "expired"].includes(session.Status)) {
+        return ok({
+          Success: false,
+          Message: `This session is ${session.Status}. Only a migration that has finished unsuccessfully can have its target discarded.`,
+        });
+      }
+      if (!session.ProvisionDatabaseName) {
+        return ok({
+          Success: false,
+          Message:
+            "This migration targeted a database that already existed, so it is not this migration's to drop.",
+        });
+      }
+      const dropped = session.DatabaseName ?? session.ProvisionDatabaseName;
+      demoStore.databases = demoStore.databases.filter((d) => d.Id !== session.DatabaseId);
+      session.DatabaseId = null;
+      session.DatabaseName = null;
+      return ok({ Success: true, Message: `Dropped '${dropped}'. Mint a new key to try again.` });
+    },
+  },
+  {
+    method: "POST",
     pattern: /^\/revoke-migration-session\/(\d+)$/,
     handle: ({ params }) => {
       const id = Number(params[0]);

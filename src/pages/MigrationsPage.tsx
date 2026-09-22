@@ -38,6 +38,7 @@ import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { MigrationTargetForm } from "@/features/migrations/MigrationTargetForm";
 import {
   useCreateMigrationSession,
+  useDiscardMigrationTarget,
   useMigrationSession,
   useMigrationSessions,
   useRevokeMigrationSession,
@@ -46,6 +47,13 @@ import { notifyError, notifySuccess } from "@/lib/notify";
 
 /** Statuses a session can still move out of, and therefore still be revoked from. */
 const REVOCABLE = new Set(["pending", "redeemed", "streaming"]);
+
+/**
+ * Statuses a target can be discarded from: the migration is over and it did not
+ * work. The backend enforces this too, and additionally refuses when the
+ * database pre-dated the migration.
+ */
+const DISCARDABLE = new Set(["failed", "revoked", "expired"]);
 
 const STATUS_COLOR: Record<string, string> = {
   pending: "blue",
@@ -83,6 +91,7 @@ export function MigrationsPage() {
 
   const createSession = useCreateMigrationSession();
   const revokeSession = useRevokeMigrationSession();
+  const discardTarget = useDiscardMigrationTarget();
 
   const [formOpen, setFormOpen] = useState(false);
   const [pending, setPending] = useState<{
@@ -135,6 +144,36 @@ export function MigrationsPage() {
       },
     });
 
+  const confirmDiscard = (session: MigrationSessionItem) =>
+    modals.openConfirmModal({
+      title: "Discard this migration's target?",
+      children: (
+        <Stack gap="xs">
+          <Text size="sm">
+            <Code>{session.DatabaseName ?? session.ProvisionDatabaseName}</Code> on{" "}
+            <b>{session.DatabaseServerName ?? `server ${session.DatabaseServerId}`}</b>{" "}
+            will be dropped, along with its registration. Whatever the failed migration
+            managed to copy goes with it.
+          </Text>
+          <Text size="sm" c="dimmed">
+            Only offered for a database this migration created. One that already existed
+            is refused, because it is not this migration&apos;s to drop.
+          </Text>
+        </Stack>
+      ),
+      labels: { confirm: "Drop the database", cancel: "Keep it" },
+      confirmProps: { color: "red" },
+      onConfirm: async () => {
+        try {
+          const result = await discardTarget.mutateAsync(session.Id);
+          if (result.Success) notifySuccess(result.Message ?? "Target discarded.");
+          else notifyError(new Error(result.Message ?? "Could not discard the target"));
+        } catch (error) {
+          notifyError(error);
+        }
+      },
+    });
+
   const rows = (sessions.data ?? []).map((session) => (
     <Table.Tr key={session.Id}>
       <Table.Td>
@@ -170,6 +209,21 @@ export function MigrationsPage() {
             >
               Revoke
             </Button>
+            {/*
+              Only shown for a target this migration created. A session that
+              streamed into a pre-existing database never offers it, so the
+              destructive action is absent rather than present and refused.
+            */}
+            {DISCARDABLE.has(session.Status) && session.ProvisionDatabaseName && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                color="red"
+                onClick={() => confirmDiscard(session)}
+              >
+                Discard target
+              </Button>
+            )}
           </RequireRole>
         </Group>
       </Table.Td>

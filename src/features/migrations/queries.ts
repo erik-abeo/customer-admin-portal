@@ -64,4 +64,18 @@ export function useRevokeMigrationSession() {
   });
 }
 
+export function useDiscardMigrationTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => migrationsApi.discardTarget(id),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: KEYS.all });
+      qc.invalidateQueries({ queryKey: KEYS.detail(id) });
+      // The database registry changed too: discarding drops the registration
+      // along with the schema.
+      qc.invalidateQueries({ queryKey: ["databases"] });
+    },
+  });
+}
+
 export const migrationSessionKeys = KEYS;
