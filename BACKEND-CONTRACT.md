@@ -126,6 +126,13 @@ An unreachable or unsuitable server is reported in the body, not as a non-2xx.
 Render `Checks` in order as a checklist. A rejected server then says which gate
 it failed rather than only that it was rejected.
 
+The portal will not submit a new server until a probe of exactly the address,
+port, login, password and certificate being registered has returned
+`IsSupported: true`. Changing any of them clears the result. The service does
+not probe again on create, so this is the portal's rule rather than the API's.
+Edits are not gated, because the stored password never comes back to the
+browser.
+
 ### 1.2 Database servers carry an admin login, which is not always `root`
 
 `database_server_info` records an **`AdminUserName`** per server, and it appears

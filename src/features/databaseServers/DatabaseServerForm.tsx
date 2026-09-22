@@ -36,6 +36,7 @@ import type {
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
 import { useProbeDatabaseServer } from "@/features/databaseServers/queries";
+import { canRegisterServer } from "./registration";
 import {
   composeValidators,
   hostname,
@@ -141,6 +142,7 @@ export function DatabaseServerForm({
     form.values.Certificate.trim(),
   ]);
   const probeResult = probed?.for === probeInputs ? probed.result : null;
+  const canSubmit = canRegisterServer(isEdit, probeResult);
 
   // The probe needs somewhere to connect and something to connect as. Without a
   // password there is nothing to test, and in edit mode the stored one is never
@@ -182,6 +184,7 @@ export function DatabaseServerForm({
   };
 
   const submit = form.onSubmit(async (values) => {
+    if (!canSubmit) return;
     const base = {
       Name: values.Name.trim(),
       Description: values.Description.trim() || null,
@@ -430,11 +433,23 @@ export function DatabaseServerForm({
           />
         </FormSection>
 
+        {!canSubmit && (
+          <Text size="xs" c="dimmed" ta="right" id="server-register-hint">
+            Run a probe that passes before registering. It checks the service can reach this server and
+            administer it, which every migration onto it will need.
+          </Text>
+        )}
+
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" loading={submitting}>
+          <Button
+            type="submit"
+            loading={submitting}
+            disabled={!canSubmit}
+            aria-describedby={canSubmit ? undefined : "server-register-hint"}
+          >
             {submitLabel}
           </Button>
         </Group>
