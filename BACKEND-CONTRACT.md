@@ -56,6 +56,74 @@ The contract for each is the corresponding TypeScript DTO in
 | GET    | `/My/get-all-static-database-users`              | —                                 | `GetStaticDatabaseUserResponse[]`     |
 | GET    | `/My/get-static-database-users-by-server/{id}`   | —                                 | `GetStaticDatabaseUserResponse[]`     |
 | GET    | `/My/get-static-database-users-by-database/{id}` | —                                 | `GetStaticDatabaseUserResponse[]`     |
+| POST   | `/My/probe-database-server`                      | `ProbeDatabaseServerRequest`      | `ProbeDatabaseServerResponse`         |
+
+### 1.1 Database server probe
+
+`POST /My/probe-database-server` connects to a candidate server and reports what
+it is, without saving anything. It is read-only and safe to call repeatedly, so
+the UI can run it on demand while an operator is still editing the form.
+
+The system supports both MySQL and MariaDB on AWS RDS and **detects which one a
+server is rather than being told**, so there is no engine field for the operator
+to fill in and no engine dropdown to build. Engine identity comes from the
+server itself; the version banner is only used for the version number.
+
+```jsonc
+// ProbeDatabaseServerRequest
+{
+  "Host": "customer-a.abc123.us-east-1.rds.amazonaws.com",
+  "Port": "3306",              // optional, defaults to 3306
+  "User": "cpmadmin",
+  "Password": "…",             // never persisted by the probe
+  "SslMode": "Required",       // optional, defaults to Required
+  "CertificatePem": null,      // optional, for VerifyCA / VerifyFull
+}
+
+// ProbeDatabaseServerResponse
+{
+  "Success": true,             // the probe ran; NOT that the server is usable
+  "Message": "MySql 8.4.3 is supported and this login can provision.",
+  "Engine": "MySql",           // "MySql" | "MariaDb" | "Unknown"
+  "EngineVersion": "8.4.3",
+  "RawVersion": "8.4.3",       // unmodified VERSION(), for diagnostics
+  "MeetsMinimumVersion": true, // floor: MySQL 8.0, MariaDB 10.6
+  "TlsInUse": true,            // TLS actually negotiated, not merely requested
+  "CanCreateDatabase": true,
+  "CanCreateUser": true,
+  "IsSupported": true,         // gate registration on THIS, not on Success
+  "Checks": [
+    { "Name": "connect", "Passed": true, "Detail": "Connected to …:3306." },
+    { "Name": "engine", "Passed": true, "Detail": "Detected MySql from the server itself." },
+    { "Name": "version", "Passed": true, "Detail": "MySql 8.4.3 meets the 8.0 minimum." },
+    { "Name": "tls", "Passed": true, "Detail": "TLS negotiated (TLS_AES_256_GCM_SHA384)." },
+    { "Name": "privileges.create-database", "Passed": true, "Detail": "Login can create databases." },
+    { "Name": "privileges.create-user", "Passed": true, "Detail": "Login can create users." },
+    { "Name": "privileges.grant-option", "Passed": true, "Detail": "Login holds GRANT OPTION." },
+  ],
+}
+```
+
+`Success: false` means the probe could not run at all, typically an unreachable
+host or a bad password, and `Checks` will hold a single failed `connect` entry.
+An unreachable or unsuitable server is reported in the body, not as a non-2xx.
+
+Render `Checks` in order as a checklist. A rejected server then says which gate
+it failed rather than only that it was rejected.
+
+### 1.2 Database mappings must name the right server
+
+`CreateUserRequest.DatabaseMappings` and `UpdateUserRequest.DatabaseMappings`
+still carry `DatabaseServerId` alongside `DatabaseId`, and the backend no longer
+stores it: a database's server is recorded on the database itself. The pair is
+**validated rather than ignored**. If any mapping names a server the database is
+not on, or a database that does not exist, the whole request is rejected with
+**400** and a message naming every offending pair.
+
+The SPA already derives `DatabaseServerId` from the selected database's own
+record, so this should never fire in normal use. It exists so that a caller
+holding a stale idea of where a customer lives finds out immediately instead of
+silently creating a user who cannot reach their database.
 
 The UI's behavior on common error codes:
 
