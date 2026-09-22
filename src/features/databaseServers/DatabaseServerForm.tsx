@@ -114,6 +114,13 @@ export function DatabaseServerForm({
         if (v.length > 0) return strongPassword("Root password")(v);
         return null;
       },
+      // The API needs a CA certificate to administer the server at all, and refuses to
+      // register one without it. Asked for here so the operator hears it from the form,
+      // not from a validation error after submitting. Edit mode sends the stored one back.
+      Certificate: (v) =>
+        !isEdit && v.trim().length === 0
+          ? "A CA certificate is required. For RDS, use the AWS global bundle."
+          : null,
     },
   });
 
@@ -377,7 +384,7 @@ export function DatabaseServerForm({
 
         <FormSection
           title="TLS certificate"
-          description="Optional CA certificate trusted by the portal when connecting over TLS."
+          description="The CA certificate the server's TLS certificate is issued under. For RDS, the AWS global bundle. Handed to CrystalPM clients with their credentials."
           icon={IconCertificate}
         >
           <Group gap="sm">

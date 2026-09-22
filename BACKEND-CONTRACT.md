@@ -222,12 +222,34 @@ for `flipped` with `SourceDroppedDateTimeUtc` null.
 `Verification` on the detail response is per table and carries
 `VerificationMethod`, either `checksum` or `row_count`. **These are not
 equivalent** and the UI should say which one a move got: matching row counts say
-nothing about the values in them. Checksums are only comparable within one
-engine, so a MySQL-to-MariaDB move falls back to counts. A mismatch fails the
-move before anything cuts over.
+nothing about the values in them. A mismatch fails the move before anything cuts
+over, and the customer is put back on the source.
 
-Planning is refused for a customer that already has a move in flight, and for a
-target server the customer is already on.
+**Moves between engines are refused.** MySQL to MariaDB, or the reverse, is a
+schema conversion, which is what a migration key and the installer are for. The
+executor checks both servers before it quiesces anyone and fails the move with
+the customer still online, so in practice every move is verified by checksum.
+`row_count` remains in the vocabulary only for a server replaced under a move
+already in flight.
+
+`create-customer-move` answers 400 with a `Message` for:
+
+* a customer that already has a move in flight;
+* a target server the customer is already on;
+* a target database name that is already registered on the target server, for
+  any customer;
+* a customer that already has a registration on the target server, since the
+  flip would collide with it.
+
+Planning then checks the live target as well, and fails the move without
+quiescing anyone if a schema of that name already exists there, registered or
+not. The copy replaces tables by name, so a schema it did not make is never its
+to fill.
+
+`SourceDatabaseName` is recorded when the move is planned and does not change.
+Before, it was read through `database_info`, which the flip rewrites, so after a
+flip it reported the target's name; rollback and drop-source now use the
+recorded name.
 
 ### 1.6 Migration sessions
 
@@ -252,6 +274,18 @@ machine on an office network which has no business holding the admin key.
 `DatabaseName` (one to provision). Both or neither is a 400: the two readings do
 different things to a customer's data. An existing database must be on the named
 server and must already belong to the named customer.
+
+A name to provision is also a 400 when it is already registered on that server to
+a different customer, and when this customer already has a database on that
+server under another name, since provisioning would reuse that one rather than
+make what was asked for. Every CrystalPM source database has the same name, so
+the default is taken on any server that already has a customer: propose
+something unique, such as the name plus the CrystalPM id.
+
+**The key as typed.** Redemption accepts the key with or without its `CPM-`
+label, in any case, with dashes, spaces or nothing between the groups, and with
+`I`, `L` and `O` read as `1`, `1` and `0`. Show it as `CPM-XXXX-XXXX-XXXX`; the
+operator does not need to be told any of this.
 
 ```jsonc
 // CreateMigrationSessionRequest
@@ -312,6 +346,23 @@ that database itself. A migration aimed at a database that already existed can
 never drop it. The UI should only surface the action when
 `ProvisionDatabaseName` is set and the status is `failed`, `revoked` or
 `expired`, so the destructive button is absent rather than present-and-refused.
+
+It also refuses, with `Success: false` and a message naming why, when:
+
+* another session streamed into the same database and did not fail. Provisioning
+  is idempotent on the customer, so a key minted to retry lands in the first
+  attempt's database; once that retry succeeds, the database is the customer's;
+* any authorized user is mapped to the database, or any move refers to it.
+
+Dropping detaches the sessions that pointed at the database rather than deleting
+them, so the history survives. A second discard of the same session answers
+`Success: true` with "already been dropped".
+
+**Redemption can answer 409.** A good key whose destination turned out to be
+taken, because a schema of that name appeared on the server after minting, is
+refused with 409 and a `Message` saying what is in the way. The key stays
+`pending` and redeems normally once the conflict is cleared. Every other refusal
+is 401 with one deliberately uninformative message.
 
 **Abandoned sessions close themselves.** The service sweeps every five minutes
 and fails any session that has not reported for fifteen, dropping the temporary

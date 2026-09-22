@@ -402,7 +402,7 @@ export function MovesPage() {
                       {" "}
                       by {detail.data.Verification[0].VerificationMethod === "checksum"
                         ? "table checksum"
-                        : "row count only, because the two servers run different engines"}
+                        : "row count only, so the values themselves were not compared"}
                     </Text>
                   </Text>
                   <Table.ScrollContainer minWidth={420} mah={320}>
