@@ -36,6 +36,8 @@ import type {
   GetMigrationSessionResponse,
   GetMigrationSessionsResponse,
   MigrationSessionItem,
+  GetFleetCapacityResponse,
+  ServerCapacity,
   ProbeDatabaseServerRequest,
   ProbeDatabaseServerResponse,
   CreateStaticDatabaseUserRequest,
@@ -134,6 +136,62 @@ const ROUTES: Route[] = [
       const found = demoStore.servers.find((s) => s.Id === id);
       if (!found) return notFound(`Database server ${id} not found`);
       return ok(found);
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/get-fleet-capacity$/,
+    handle: () => {
+      // Measured from the demo store rather than invented, so the page shows the
+      // same servers and customers the rest of demo mode does. Sizes are made up,
+      // since there is no server to ask.
+      const servers: ServerCapacity[] = demoStore.servers.map((server, index) => {
+        const databases = demoStore.databases
+          .filter((d) => d.DatabaseServerId === server.Id)
+          .map((d, i) => ({
+            DatabaseId: d.Id,
+            DatabaseName: d.DatabaseName,
+            CrystalPmId: d.CrystalPmId,
+            DataBytes: 900_000_000 + i * 640_000_000,
+            IndexBytes: 120_000_000 + i * 40_000_000,
+            ApproxRowCount: 1_200_000 + i * 380_000,
+            AuthorizedUserCount: 3 + i,
+            AuthorizationsLast30Days: 420 + i * 180,
+            IsOrphaned: false,
+          }));
+
+        const max = 10;
+        const used = databases.length;
+        const verdict =
+          used >= max ? "Full" : used >= max * 0.8 ? "NearCapacity" : "Headroom";
+
+        return {
+          DatabaseServerId: server.Id,
+          Name: server.Name,
+          Engine: index === 1 ? "MariaDb" : "MySql",
+          EngineVersion: index === 1 ? "10.11.6" : "8.4.3",
+          Status: "available",
+          CustomerDatabaseCount: used,
+          MaxCustomerDatabases: max,
+          AuthorizedUserCount: databases.reduce((n, d) => n + d.AuthorizedUserCount, 0),
+          DataBytes: databases.reduce((n, d) => n + d.DataBytes, 0),
+          IndexBytes: databases.reduce((n, d) => n + d.IndexBytes, 0),
+          ApproxRowCount: databases.reduce((n, d) => n + d.ApproxRowCount, 0),
+          ThreadsConnected: 18 + index * 22,
+          MaxConnections: 200,
+          Verdict: verdict,
+          VerdictReasons: [
+            `${used} of ${max} customer databases used.`,
+            `${18 + index * 22} of 200 connections in use.`,
+          ],
+          UnreachableReason: null,
+          Databases: databases.sort(
+            (a, b) => b.DataBytes + b.IndexBytes - (a.DataBytes + a.IndexBytes),
+          ),
+        };
+      });
+
+      return ok<GetFleetCapacityResponse>({ Success: true, Message: null, Servers: servers });
     },
   },
   {

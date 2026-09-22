@@ -65,6 +65,9 @@ const DatabasesPage = lazy(() =>
 const EventLogPage = lazy(() =>
   import("@/pages/EventLogPage").then((m) => ({ default: m.EventLogPage })),
 );
+const CapacityPage = lazy(() =>
+  import("@/pages/CapacityPage").then((m) => ({ default: m.CapacityPage })),
+);
 const MigrationsPage = lazy(() =>
   import("@/pages/MigrationsPage").then((m) => ({ default: m.MigrationsPage })),
 );
@@ -144,6 +147,7 @@ const router = createBrowserRouter(
         { path: "/static-users", element: <StaticUsersPage /> },
         { path: "/event-log", element: <EventLogPage /> },
         { path: "/migrations", element: <MigrationsPage /> },
+        { path: "/capacity", element: <CapacityPage /> },
         { path: "*", element: <NotFoundPage /> },
       ],
     },

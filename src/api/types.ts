@@ -126,6 +126,77 @@ export interface ProbeDatabaseServerResponse {
   Checks: DatabaseServerProbeCheck[];
 }
 
+// ---------- Server capacity and placement ----------
+
+/** Headroom, NearCapacity, Full or Unreachable. */
+export type CapacityVerdict =
+  | "Headroom"
+  | "NearCapacity"
+  | "Full"
+  | "Unreachable"
+  | "Unknown";
+
+/** One customer's footprint on a server. */
+export interface CustomerDatabaseCapacity {
+  DatabaseId: number;
+  DatabaseName: string | null;
+  CrystalPmId: number;
+  DataBytes: number;
+  IndexBytes: number;
+  /** InnoDB's sampled estimate. Fine for comparing customers, not for anything exact. */
+  ApproxRowCount: number;
+  AuthorizedUserCount: number;
+  /**
+   * Authorizations over the last 30 days. A proxy for how busy an office is:
+   * how often people sat down to use CrystalPM, which is what scales when
+   * another customer is added beside them.
+   */
+  AuthorizationsLast30Days: number;
+  /** Registered but absent from the server, or present but not registered. */
+  IsOrphaned: boolean;
+}
+
+/**
+ * How full a server is, and whether another customer should go on it.
+ *
+ * `VerdictReasons` is always populated, including for `Headroom`. A verdict on
+ * its own is a number somebody has to take on faith, and an operator choosing
+ * where a customer's records live should not be taking anything on faith.
+ */
+export interface ServerCapacity {
+  DatabaseServerId: number;
+  Name: string | null;
+  Engine: string | null;
+  EngineVersion: string | null;
+  Status: string | null;
+  CustomerDatabaseCount: number;
+  /** Soft placement cap. Null means no stated limit to compare against. */
+  MaxCustomerDatabases: number | null;
+  AuthorizedUserCount: number;
+  DataBytes: number;
+  IndexBytes: number;
+  ApproxRowCount: number;
+  ThreadsConnected: number | null;
+  MaxConnections: number | null;
+  Verdict: CapacityVerdict;
+  VerdictReasons: string[];
+  /** Why the server could not be measured, when the verdict is `Unreachable`. */
+  UnreachableReason: string | null;
+  Databases: CustomerDatabaseCapacity[];
+}
+
+export interface GetServerCapacityResponse {
+  Success: boolean;
+  Message: string | null;
+  Server: ServerCapacity | null;
+}
+
+export interface GetFleetCapacityResponse {
+  Success: boolean;
+  Message: string | null;
+  Servers: ServerCapacity[];
+}
+
 // ---------- Migration sessions ----------
 
 /**

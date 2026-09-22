@@ -155,7 +155,44 @@ record, so this should never fire in normal use. It exists so that a caller
 holding a stale idea of where a customer lives finds out immediately instead of
 silently creating a user who cannot reach their database.
 
-### 1.4 Migration sessions
+### 1.4 Server capacity and placement
+
+| Method | URL | Response |
+| ------ | --- | -------- |
+| GET | `/My/get-fleet-capacity` | `GetFleetCapacityResponse` |
+| GET | `/My/get-server-capacity/{id}` | `GetServerCapacityResponse` |
+
+Measured live on each call rather than served from a cache. Three sources: the
+authorization database for who is registered where, the server's own
+`information_schema` for what is actually on disk, and `event_log` for how much
+anybody is using it.
+
+`Verdict` is `Headroom`, `NearCapacity`, `Full` or `Unreachable`, and
+**`VerdictReasons` is always populated, including for `Headroom`**. Render them.
+A verdict on its own is a number somebody has to take on faith, and an operator
+choosing where a customer's records live should not be taking anything on faith.
+
+Two things the UI must not flatten:
+
+**`Unreachable` is a result, not an error.** One server nobody can reach must
+not stop the rest of the fleet being shown, and it is itself worth knowing: a
+server that cannot be queried is not one to place a customer on. It ranks
+*below* `Full`, because a full server is a known quantity with no room while an
+unreachable one has unknown contents.
+
+**`IsOrphaned` on a database means it is registered here but absent from the
+server.** That is a customer the system believes it can reach and cannot. Show
+it; rendering zero bytes instead makes it look merely empty.
+
+`MaxCustomerDatabases` may be null, meaning no stated limit. That is not the
+same as unlimited room, and a server without one should not win a comparison
+against a server that has thought about its limits.
+
+A background collector writes these into `server_metrics_snapshot` hourly and
+keeps 400 days, so trend is available later even though no endpoint serves it
+yet.
+
+### 1.5 Migration sessions
 
 The streaming-migration flow. The portal mints a key for one customer's move and
 shows it once; the operator pastes it into the MariaDB installer, which redeems

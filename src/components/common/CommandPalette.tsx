@@ -9,6 +9,7 @@ import {
   IconMoon,
   IconSearch,
   IconServer2,
+  IconChartBar,
   IconSun,
   IconTransfer,
   IconUsers,
@@ -93,6 +94,14 @@ export function CommandPalette() {
               keywords: ["migrate", "move", "key", "stream", "onboarding"],
               leftSection: <IconTransfer size={18} stroke={1.7} />,
               onClick: () => navigate("/migrations"),
+            },
+            {
+              id: "nav-capacity",
+              label: "Capacity",
+              description: "How full each server is, and where the next customer should go",
+              keywords: ["placement", "capacity", "servers", "headroom", "size"],
+              leftSection: <IconChartBar size={18} stroke={1.7} />,
+              onClick: () => navigate("/capacity"),
             },
           ]
         : []),
