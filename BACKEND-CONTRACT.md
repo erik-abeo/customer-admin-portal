@@ -131,7 +131,9 @@ from the banner, with MariaDB's `5.5.5-` compatibility prefix stripped first.
 }
 ```
 
-`IsSupported` requires every gate, `CanGrant` included: without `GRANT OPTION`
+`IsSupported` requires every privilege and version gate, and an identified
+engine; `TlsInUse` is reported but is not one of them. `CanGrant` is a gate:
+without `GRANT OPTION`
 the service cannot give a migration login access to the schema it provisions,
 so a server whose login lacks it is refused at registration rather than at the
 first redemption. `CanSeeConnections` is a gate too: without `PROCESS` the login
@@ -140,8 +142,11 @@ ending a CrystalPM session and draining a move would all report success having
 done nothing. Its check is `privileges.process`, and a rejection names it in
 `Message` ("the login cannot see other logins' connections (PROCESS)").
 
-`Success: false` means the probe could not run at all, typically an unreachable
-host or a bad password, and `Checks` will hold a single failed `connect` entry.
+`Success: false` means the probe did not finish, typically an unreachable host
+or a bad password. `Checks` then holds whatever ran before the failure, ending
+with a failed `connect` entry whose `Detail` is the error: on its own when the
+connection itself failed, after a passed `connect` and any later checks when
+something failed once connected.
 An unreachable or unsuitable server is reported in the body, not as a non-2xx.
 
 Render `Checks` in order as a checklist. A rejected server then says which gate
@@ -190,6 +195,11 @@ everything that reads them. The portal sends null for them already.
 on `CreateDatabaseServerInfoRequest`, `UpdateDatabaseServerInfoRequest`,
 `DatabaseServerInfoItem` and `GetDatabaseServerInfoResponse`. It defaults to
 `root` when omitted, so nothing that predates it changes behaviour.
+
+`DatabaseServerInfoItem` and `GetDatabaseServerInfoResponse` also carry the
+server's **`Status`** (`available` when the column has none). Only an
+`available` server takes new customers; see the migration and move refusals
+below.
 
 It has to be settable. AWS RDS **reserves `root`** and will not create a master
 user with that name, so an RDS server is administered under whatever master
@@ -418,10 +428,10 @@ A `DatabaseServerId` that does not exist is a 400 ("Database server N does not
 exist."). A name to provision is refused with a 400 when the server's recorded
 status is anything but `available`, the same rule capacity applies to new
 customers. A key against an existing database on such a server is still
-allowed, since it is a retry for a customer already there. The status is on the
-capacity reading (`ServerCapacity.Status`), not on `DatabaseServerInfoItem`, and
-the portal reads it from there to disable those servers in its pickers, with the
-reason, for a key that provisions and for a move's target.
+allowed, since it is a retry for a customer already there. The status comes
+with the server list (`DatabaseServerInfoItem.Status`), and the portal reads it
+from there to disable those servers in its pickers, with the reason, for a key
+that provisions and for a move's target.
 
 A name to provision is also a 400 when this customer already has any database on
 that server (select it as the existing database instead), when the name is
@@ -626,24 +636,28 @@ The SPA can mirror its in-memory audit-log buffer to a backend endpoint
 that you control. There is no required URL or shape from the API
 service's perspective: `VITE_AUDIT_SINK_URL` points the SPA wherever
 you want the entries to land. The body for each `POST` is a single
-`AuditEntry`:
+`AuditEntry`, exactly as `src/lib/auditLog.ts` records it:
 
 ```jsonc
 {
-  "timestamp": "2026-04-21T18:43:02.123Z",
-  "method": "POST",
-  "path": "/My/create-database-server-info",
-  "status": 200,
+  "timestamp": "2026-04-21T18:43:02.123Z", // when the response arrived
+  "admin": "erik.griffin", // the signed-in admin name, or null
+  "method": "POST", // only writes: POST, PUT, PATCH, DELETE
+  "url": "/create-database-server-info", // as the SPA requested it, without the base URL or /My
+  "status": 200, // 0 when no response arrived
+  "ok": true,
   "durationMs": 142,
-  "adminName": "erik.griffin",
-  "summary": "create database server",
-  "requestId": "5b1f...",
+  "errorMessage": "...", // only on a failed request
 }
 ```
 
-Failures are silent (sink is best-effort and must never block the UI).
-Authentication uses whichever auth strategy is currently installed on
-the SPA's `httpClient`.
+Each entry is sent once. Failures are silent (the sink is best-effort and must
+never block the UI).
+
+**The sink receives the admin API key.** Each POST carries the same auth
+headers as an API call, which today means the `api-key` header. Whoever runs the
+sink URL can therefore call every management endpoint as an admin, so it must be
+trusted exactly like the API itself: never point it at a third-party service.
 
 ---
 

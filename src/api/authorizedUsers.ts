@@ -1,4 +1,4 @@
-import { httpClient } from "./httpClient";
+import { httpClient, requireSuccess } from "./httpClient";
 import type {
   AuthorizedUserInfoItem,
   CreateUserRequest,
@@ -10,7 +10,10 @@ import type {
 export const authorizedUsersApi = {
   async list(): Promise<AuthorizedUserInfoItem[]> {
     const { data } = await httpClient.get<GetAuthorizedUsersResponse>("/get-users");
-    return data.AuthorizedUserInfoList ?? [];
+    return (
+      requireSuccess(data, "The service could not read authorized users.")
+        .AuthorizedUserInfoList ?? []
+    );
   },
 
   async listForDatabase(
@@ -20,14 +23,17 @@ export const authorizedUsersApi = {
     const { data } = await httpClient.get<GetAuthorizedUsersResponse>(
       `/get-users/${databaseServerId}/${databaseId}`,
     );
-    return data.AuthorizedUserInfoList ?? [];
+    return (
+      requireSuccess(data, "The service could not read authorized users.")
+        .AuthorizedUserInfoList ?? []
+    );
   },
 
   async get(userId: number | string): Promise<GetAuthorizedUserResponse> {
     const { data } = await httpClient.get<GetAuthorizedUserResponse>(
       `/get-user/${userId}`,
     );
-    return data;
+    return requireSuccess(data, "The service could not read that user.");
   },
 
   async create(request: CreateUserRequest): Promise<unknown> {

@@ -107,8 +107,7 @@ export function MovesPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const detail = useCustomerMove(detailId ?? undefined);
-  // Server status lives on the capacity reading, so it is fetched only while
-  // the form is open.
+  // Each server's recorded status comes with the server list already loaded.
   const statuses = serverStatuses(servers.data);
 
   const selectedDatabase = (databases.data ?? []).find(

@@ -41,7 +41,9 @@ function buildProbeUrl(): string {
   const prefix = env.apiControllerPrefix.startsWith("/")
     ? env.apiControllerPrefix
     : `/${env.apiControllerPrefix}`;
-  return `${base}${prefix}/get-all-database-server-info`;
+  // Any endpoint behind the api-key proves the key. This one returns no
+  // secrets; the server list returns every server's decrypted admin password.
+  return `${base}${prefix}/get-all-database-info`;
 }
 
 export function LoginPage() {

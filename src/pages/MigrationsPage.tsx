@@ -91,8 +91,7 @@ export function MigrationsPage() {
   const discardTarget = useDiscardMigrationTarget();
 
   const [formOpen, setFormOpen] = useState(false);
-  // Server status lives on the capacity reading, so it is fetched only while
-  // the form is open.
+  // Each server's recorded status comes with the server list already loaded.
   const statuses = serverStatuses(servers.data);
   const [pending, setPending] = useState<{
     request: CreateMigrationSessionRequest;

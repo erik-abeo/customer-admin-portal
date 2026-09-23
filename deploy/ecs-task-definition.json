@@ -8,13 +8,13 @@
     "",
     "Then create / update a service that uses this task definition behind an",
     "ALB target group on port 8080. The container is ROOTLESS (uid 101) and",
-    "listens on 8080 — no need for awsvpc port mappings to 80/443.",
+    "listens on 8080, so there is no need for awsvpc port mappings to 80/443.",
     "",
-    "Sensitive runtime values (Sentry DSN, audit-sink URL) are pulled from",
-    "AWS Secrets Manager via the secrets[] block; the Vite static bundle",
-    "doesn't see them at build time. To make these reach the SPA, you need",
-    "an entrypoint script that writes a /usr/share/nginx/html/config.json",
-    "from the env vars; the SPA reads that on boot."
+    "The SPA has no runtime configuration. Every VITE_* value, the Sentry DSN",
+    "and audit-sink URL included, is baked in at image build with --build-arg",
+    "(see deploy/README.md), so none of them belongs here: the container is",
+    "nginx serving static files, and environment variables never reach the",
+    "bundle."
   ],
   "family": "customer-admin-portal",
   "requiresCompatibilities": ["FARGATE"],
@@ -42,17 +42,9 @@
       "readonlyRootFilesystem": false,
       "user": "101",
       "environment": [
-        { "name": "NODE_ENV", "value": "production" },
-        { "name": "TZ", "value": "UTC" }
-      ],
-      "secrets": [
         {
-          "name": "VITE_SENTRY_DSN",
-          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:cap/sentry-dsn"
-        },
-        {
-          "name": "VITE_AUDIT_SINK_URL",
-          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:cap/audit-sink-url"
+          "name": "TZ",
+          "value": "UTC"
         }
       ],
       "healthCheck": {
@@ -77,7 +69,13 @@
       "linuxParameters": {
         "initProcessEnabled": true
       },
-      "ulimits": [{ "name": "nofile", "softLimit": 65535, "hardLimit": 65535 }]
+      "ulimits": [
+        {
+          "name": "nofile",
+          "softLimit": 65535,
+          "hardLimit": 65535
+        }
+      ]
     }
   ]
 }

@@ -11,25 +11,33 @@ import type {
 const KEYS = {
   all: ["database-servers"] as const,
   detail: (id: number) => ["database-servers", id] as const,
+  // Under detail, so invalidating or removing a server's detail covers it.
+  edit: (id: number) => ["database-servers", id, "edit"] as const,
+};
+
+/** A server as the cache holds it: no password, and only whether a CA is stored. */
+export type DatabaseServerWithoutSecrets = DatabaseServerInfoItem & {
+  HasCertificate: boolean;
 };
 
 /**
  * A server with its decrypted administrator password and certificate removed.
- * The list endpoint returns both for every server, and nearly every page uses
- * the list only for names and ids, so they are dropped before the list reaches
- * the query cache rather than kept there for every server on every page.
+ * Both endpoints return them, and apart from the edit form every page uses a
+ * server only for its name, address and whether it has a CA, so they are
+ * dropped before the result reaches the query cache.
  */
 export const withoutSecrets = (
   server: DatabaseServerInfoItem,
-): DatabaseServerInfoItem => ({
+): DatabaseServerWithoutSecrets => ({
   ...server,
   RootUserPassword: "",
   Certificate: null,
+  HasCertificate: Boolean(server.Certificate?.trim()),
 });
 
 /**
  * Every server, without secrets. For a server's own password and certificate,
- * which only the edit form needs, use {@link useDatabaseServer}.
+ * which only the edit form needs, use {@link useDatabaseServerForEdit}.
  */
 export function useDatabaseServers() {
   return useQuery({
@@ -39,26 +47,41 @@ export function useDatabaseServers() {
 }
 
 /**
- * Fetch a single database server by id. Backed by
+ * Fetch a single database server by id, without secrets. Backed by
  * `GET /My/get-database-server-info/{id}`.
  *
  * If the list cache (`useDatabaseServers`) already has a matching record,
  * that value is surfaced as `placeholderData` so deep-link visits paint
- * instantly while the by-id refetch happens in the background. The placeholder
- * has no secrets, so anything that needs them, the edit form above all, must
- * wait until `isPlaceholderData` is false.
+ * instantly while the by-id refetch happens in the background. Both are
+ * stripped the same way, so the placeholder is as complete as the result.
  */
 export function useDatabaseServer(id: number | undefined) {
   const qc = useQueryClient();
   return useQuery({
     queryKey: id ? KEYS.detail(id) : ["database-servers", "disabled"],
-    queryFn: () => databaseServersApi.get(id as number),
+    queryFn: async () => withoutSecrets(await databaseServersApi.get(id as number)),
     enabled: id !== undefined,
     placeholderData: () => {
       if (id === undefined) return undefined;
-      const cached = qc.getQueryData<DatabaseServerInfoItem[]>(KEYS.all);
+      const cached = qc.getQueryData<DatabaseServerWithoutSecrets[]>(KEYS.all);
       return cached?.find((s) => s.Id === id);
     },
+  });
+}
+
+/**
+ * A server with its decrypted password and certificate, for the edit form and
+ * nothing else. Pass `undefined` while the form is closed. It is never served
+ * from cache (`gcTime` 0 drops it as soon as the form unmounts) and has no
+ * placeholder, so the form only ever opens on the stored values.
+ */
+export function useDatabaseServerForEdit(id: number | undefined) {
+  return useQuery({
+    queryKey: id ? KEYS.edit(id) : ["database-servers", "edit", "disabled"],
+    queryFn: () => databaseServersApi.get(id as number),
+    enabled: id !== undefined,
+    gcTime: 0,
+    staleTime: 0,
   });
 }
 

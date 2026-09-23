@@ -158,6 +158,14 @@ export function StaticUsersPage() {
   >(null);
   const [secret, setSecret] = useState<SecretReveal | null>(null);
 
+  // The mutations' cached results hold the password too, so they are cleared
+  // along with the modal rather than left in memory after it has been copied.
+  const closeSecret = () => {
+    setSecret(null);
+    create.reset();
+    update.reset();
+  };
+
   const grouped = useMemo(() => groupByUserName(list.data ?? []), [list.data]);
   const serverNameById = useMemo(
     () =>
@@ -500,12 +508,20 @@ export function StaticUsersPage() {
         )}
       </Modal>
 
+      {/*
+        A password is shown once and cannot be read back, so while one is on
+        screen the modal only closes through the explicit button: no Escape, no
+        click outside, no close button. Losing it means rotating again.
+      */}
       <Modal
         opened={secret !== null}
-        onClose={() => setSecret(null)}
+        onClose={closeSecret}
         title={secret?.title ?? ""}
         size="md"
         centered
+        closeOnEscape={!secret?.password}
+        closeOnClickOutside={!secret?.password}
+        withCloseButton={!secret?.password}
       >
         {secret && (
           <Stack gap="md">
@@ -573,7 +589,9 @@ export function StaticUsersPage() {
               </Stack>
             )}
             <Group justify="flex-end">
-              <Button onClick={() => setSecret(null)}>Done</Button>
+              <Button onClick={closeSecret}>
+                {secret.password ? "I have copied it" : "Done"}
+              </Button>
             </Group>
           </Stack>
         )}

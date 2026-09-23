@@ -19,6 +19,7 @@ import type { DatabaseServerInfoItem, ProbeDatabaseServerResponse } from "@/api/
 import {
   databaseServerKeys,
   useDatabaseServer,
+  useDatabaseServerForEdit,
   useDatabaseServers,
   useProbeDatabaseServer,
 } from "./queries";
@@ -108,8 +109,32 @@ describe("useDatabaseServer", () => {
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true);
     });
-    expect(result.current.data).toEqual(sampleItem);
+    expect(result.current.data).toEqual({
+      ...sampleItem,
+      RootUserPassword: "",
+      HasCertificate: false,
+    });
     expect(databaseServersApi.get).toHaveBeenCalledWith(7);
+  });
+
+  it("keeps no password or certificate, only whether a certificate is stored", async () => {
+    vi.mocked(databaseServersApi.get).mockResolvedValueOnce({
+      ...sampleItem,
+      RootUserPassword: "Real-Admin-Pass!",
+      Certificate: "-----BEGIN CERTIFICATE-----",
+    });
+    const client = makeClient();
+    const { result } = renderHook(() => useDatabaseServer(7), {
+      wrapper: makeWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const cached = client.getQueryData<DatabaseServerInfoItem>(
+      databaseServerKeys.detail(7),
+    );
+    expect(cached?.RootUserPassword).toBe("");
+    expect(cached?.Certificate).toBeNull();
+    expect(result.current.data?.HasCertificate).toBe(true);
   });
 
   it("uses the list cache as placeholderData while refetching by id", async () => {
@@ -122,13 +147,14 @@ describe("useDatabaseServer", () => {
     );
 
     const client = makeClient();
-    client.setQueryData<DatabaseServerInfoItem[]>(databaseServerKeys.all, [sampleItem]);
+    const listed = { ...sampleItem, HasCertificate: false };
+    client.setQueryData(databaseServerKeys.all, [listed]);
 
     const { result } = renderHook(() => useDatabaseServer(7), {
       wrapper: makeWrapper(client),
     });
 
-    expect(result.current.data).toEqual(sampleItem);
+    expect(result.current.data).toEqual(listed);
     expect(result.current.isPlaceholderData).toBe(true);
     expect(result.current.isLoading).toBe(false);
 
@@ -203,5 +229,32 @@ describe("useProbeDatabaseServer", () => {
     });
     expect(result.current.data?.IsSupported).toBe(false);
     expect(result.current.data?.Checks).toHaveLength(2);
+  });
+});
+
+describe("useDatabaseServerForEdit", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns the stored secrets and drops them once the form unmounts", async () => {
+    const stored = { ...sampleItem, RootUserPassword: "Real-Admin-Pass!" };
+    vi.mocked(databaseServersApi.get).mockResolvedValueOnce(stored);
+    // Default gcTime, so it is the hook's own gcTime 0 that drops the entry.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, unmount } = renderHook(() => useDatabaseServerForEdit(7), {
+      wrapper: makeWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.data).toEqual(stored));
+    unmount();
+    await waitFor(() =>
+      expect(client.getQueryData(databaseServerKeys.edit(7))).toBeUndefined(),
+    );
+  });
+
+  it("does not fetch while the form is closed", () => {
+    renderHook(() => useDatabaseServerForEdit(undefined), {
+      wrapper: makeWrapper(makeClient()),
+    });
+    expect(databaseServersApi.get).not.toHaveBeenCalled();
   });
 });

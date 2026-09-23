@@ -91,8 +91,8 @@ export const seedServers: DatabaseServerInfoItem[] = [
 ];
 
 /**
- * Each server's recorded `status`. The server list does not carry it; the
- * service reports it on the capacity reading. Only `available` takes new
+ * Each server's recorded `status`, which the demo adds to the server list
+ * and the capacity reading, as the service does. Only `available` takes new
  * customers, so us-east-legacy-01 shows the refusal. A server created during
  * the demo is `available`, as the column defaults.
  */

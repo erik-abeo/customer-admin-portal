@@ -11,8 +11,8 @@ introducing a parallel one.
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `nginx.conf`               | nginx site config used inside the container. SPA fallback, immutable asset caching, `/healthz`, security headers (included from `security-headers.conf`), gzip, and an optional `/api/` reverse proxy to the gateway. |
 | `security-headers.conf`    | CSP, HSTS, COOP, CORP, XCTO, X-Frame-Options, Referrer-Policy and Permissions-Policy. Included at server level and in every location that adds its own header, because nginx drops inherited headers in those.        |
-| `ecs-task-definition.json` | Hand-edit AWS ECS Fargate task definition (no Terraform required). Wires CloudWatch logs, secrets injection (Sentry DSN, audit-sink URL), `/healthz` ECS healthcheck, rootless user (uid 101).                        |
-| `terraform/`               | Terraform skeleton (ECR + log group + IAM + task definition + ALB target group + ECS service). Reusable starting point — assumes a VPC + internal ALB + ECS cluster already exist.                                    |
+| `ecs-task-definition.json` | Hand-edit AWS ECS Fargate task definition (no Terraform required). Wires CloudWatch logs, `/healthz` ECS healthcheck, rootless user (uid 101).                                                                        |
+| `terraform/`               | Terraform skeleton (ECR + log group + IAM + task definition + ALB target group + ECS service). Reusable starting point; assumes a VPC + internal ALB + ECS cluster already exist.                                     |
 
 ## Image build
 
@@ -20,7 +20,7 @@ introducing a parallel one.
 # From the repo root:
 docker build -t customer-admin-portal:local .
 docker run --rm -p 8080:8080 customer-admin-portal:local
-# → http://localhost:8080
+# then open http://localhost:8080
 ```
 
 The Dockerfile is multi-stage:
@@ -34,28 +34,43 @@ target the same path.
 
 ## Build-time configuration
 
-The values below are baked into the static JS bundle at `npm run build`
-time. Override at image build by passing `--build-arg`:
+Every setting is baked into the static JS bundle at `npm run build` time, and
+the Dockerfile declares an `ARG` for each variable the SPA reads. Pass them with
+`--build-arg`; anything not passed gets the default below. `.env` files are
+excluded from the build context, so build args are the only way in.
 
 ```bash
 docker build \
-  --build-arg VITE_API_BASE_URL=https://api.internal \
-  --build-arg VITE_API_CONTROLLER_PREFIX=/My \
-  --build-arg VITE_APP_NAME="Customer Admin Portal" \
+  --build-arg VITE_API_BASE_URL=/api \
+  --build-arg VITE_FEATURE_MIGRATIONS=true \
+  --build-arg VITE_ENVIRONMENT=production \
   -t customer-admin-portal:local .
 ```
 
-The API key is **never** baked into the image — it is supplied by the
-operator at the runtime login screen and stored in `sessionStorage`.
+| Build arg                    | Default                 | Effect                                                                                                  |
+| ---------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`          | `/api`                  | Where the SPA sends API calls. `/api` goes through this container's nginx proxy.                        |
+| `VITE_API_CONTROLLER_PREFIX` | `/My`                   | The route every API controller shares.                                                                  |
+| `VITE_APP_NAME`              | `Customer Admin Portal` | Name shown in the header and page titles.                                                               |
+| `VITE_ENVIRONMENT`           | empty (`development`)   | Environment label sent to Sentry.                                                                       |
+| `VITE_DEMO_MODE`             | `false`                 | Serves in-memory fixtures instead of calling the API. Never for a real deployment.                      |
+| `VITE_FEATURE_MIGRATIONS`    | `false`                 | Shows the Migrations page, which mints streaming-migration keys.                                        |
+| `VITE_FEATURE_EVENT_LOG`     | `false`                 | Shows the Event Log viewer. Needs the pending event-log endpoints.                                      |
+| `VITE_FEATURE_DELETES`       | `false`                 | Shows delete actions. Needs the pending delete endpoints.                                               |
+| `VITE_FEATURE_RBAC`          | `false`                 | Gates write actions on the `X-Admin-Role` response header. Off means everyone is an admin.              |
+| `VITE_FEATURE_AUDIT_SINK`    | `false`                 | POSTs each admin write to `VITE_AUDIT_SINK_URL`.                                                        |
+| `VITE_AUDIT_SINK_URL`        | empty                   | The audit sink. It receives the admin API key on every POST, so it must be trusted like the API itself. |
+| `VITE_SENTRY_DSN`            | empty (off)             | Turns on Sentry error reporting. Add its ingest host to `connect-src` in `security-headers.conf`.       |
+| `VITE_IDLE_TIMEOUT_MINUTES`  | empty (`30`)            | Idle minutes before a forced sign-out; `0` disables it.                                                 |
+| `VITE_IDLE_WARN_MINUTES`     | empty (`1`)             | Minutes of warning before that sign-out.                                                                |
 
-## Runtime configuration
+None of these is a secret: whatever is baked in is readable by anyone who can
+load the bundle. The API key is **never** baked into the image; it is supplied
+by the operator at the login screen and stored in `sessionStorage`.
 
-Sentry DSN and audit-sink URL are runtime values. The simplest pattern is
-to bake placeholders at build time and overwrite them via an init script
-that writes a `config.json` from the container's environment variables;
-the SPA can then read that file before bootstrap. ECS task definition
-ships these as `secrets[]` so they never appear in `docker inspect` or
-log output.
+There is no runtime configuration. The container is nginx serving static
+files, so environment variables and Secrets Manager entries set on the task do
+not reach the SPA, and changing any value above means building a new image.
 
 ## Security headers
 
@@ -79,7 +94,7 @@ If you point the SPA at a different API origin, add it to `connect-src`.
 
 ## Source maps and Sentry
 
-The Vite build emits source maps as `sourcemap: "hidden"` — the `.map`
+The Vite build emits source maps as `sourcemap: "hidden"`: the `.map`
 files are produced alongside each chunk but the bundle does **not**
 contain a `//# sourceMappingURL=` comment. This means:
 
@@ -105,7 +120,7 @@ npx @sentry/cli sourcemaps upload \
 
 The release identifier must match the value Vite injects into the bundle
 via `__APP_VERSION__` (which is read from `package.json`'s `version`
-field — see `vite.config.ts`). Sentry then matches a runtime stack trace
+field; see `vite.config.ts`). Sentry then matches a runtime stack trace
 to the uploaded maps via that release id and the chunk filename.
 
 If you want to embed Sentry source-map upload into the image build, do
@@ -116,14 +131,11 @@ nothing extra is required to keep them out of the runtime container.
 
 ## Secret rotation
 
-Sensitive values live in AWS Secrets Manager (or the equivalent). Rotation
-procedure for the per-deploy values:
-
-1. Update the secret via the cloud console or CLI.
-2. Force a fresh ECS deployment (`aws ecs update-service ... --force-new-deployment`)
-   so the new task pulls the new value at startup.
-3. The previous deployment continues serving until drained — there is no
-   secret stored in the running tasks beyond the env-var injection.
+The image holds no secrets. Every setting is compiled into the bundle at build
+time and is readable by anyone who can load the portal, so changing one, such as
+the Sentry DSN or the audit sink URL, means rebuilding the image with the new
+build arg and deploying it (`aws ecs update-service ... --force-new-deployment`
+once the new tag is pushed). Nothing set on the running task reaches the app.
 
 The session-scoped admin API key (entered at login) can be rotated by:
 

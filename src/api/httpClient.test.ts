@@ -23,6 +23,26 @@ describe("ApiError", () => {
 });
 
 describe("messageFromBody", () => {
+  it("reads a SuperTokens status passed through by the user endpoints", () => {
+    // create-user's 400 when the email is taken.
+    expect(messageFromBody({ Status: "EMAIL_ALREADY_EXISTS_ERROR" })).toBe(
+      "A user with that email address already exists.",
+    );
+    expect(messageFromBody({ status: "UNKNOWN_USER_ID_ERROR" })).toBe(
+      "That user no longer exists in the sign-in service.",
+    );
+    expect(messageFromBody({ Status: "SOMETHING_NEW_ERROR" })).toBe(
+      "The sign-in service refused the change (SOMETHING_NEW_ERROR).",
+    );
+  });
+
+  it("prefers a Message over a status, and ignores OK", () => {
+    expect(
+      messageFromBody({ Status: "EMAIL_ALREADY_EXISTS_ERROR", Message: "why" }),
+    ).toBe("why");
+    expect(messageFromBody({ Status: "OK" })).toBeUndefined();
+  });
+
   it("reads the service's PascalCase Message", () => {
     // What a 409 from redeem or a 400 from create-customer-move looks like.
     expect(

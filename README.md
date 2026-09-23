@@ -3,12 +3,14 @@
 Internal web portal for managing the **Remote MariaDB Authentication System**
 that backs CrystalPM's remote-database feature. Replaces the customer-facing
 parts of the legacy Employee Utility with a browser-based UI suitable for AWS
-hosting (S3 + CloudFront, ECS, EC2 + Nginx, container behind ALB, etc.).
+hosting (ECS, EC2 + Nginx, or a container behind an ALB; S3 + CloudFront once
+the API enables CORS, see below).
 
 The portal is a Vite + React 18 + TypeScript SPA that talks to the
 `ClientRemoteDatabaseAccessAPI` ASP.NET Web Service running on the gateway
-server (typically reverse-proxied by Nginx behind
-`https://remotedb.crystalpm.net`).
+server. In production the SPA calls `/api`, which the container's nginx
+proxies to the service (at `https://remotedb.crystalpm.net`), so the browser
+only ever talks to one origin.
 
 ## Features
 
@@ -41,8 +43,8 @@ server (typically reverse-proxied by Nginx behind
 ## Prerequisites
 
 - **Node.js 22.13+** (pinned in `.nvmrc`). The Dockerfile uses Node 22.
-- Network access to the ASP.NET service (default base URL
-  `https://remotedb.crystalpm.net`).
+- Network access to the ASP.NET service (for local development, its own URL,
+  such as `https://localhost:5001`).
 
 ## Local development
 
@@ -78,11 +80,15 @@ fixtures. Implementation lives in [`src/demo/`](./src/demo/); start at
 
 ### Build-time environment variables
 
-| Variable                     | Required | Description                                                                                                                                                                                             |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VITE_API_BASE_URL`          | yes      | Origin of the ASP.NET service (no trailing slash). E.g. `https://remotedb.crystalpm.net` for production, `https://localhost:5001` for local IIS Express, `/api` when proxying through this app's nginx. |
-| `VITE_API_CONTROLLER_PREFIX` | no       | Defaults to `/My`, the route every `ClientRemoteDatabaseAccessAPI` controller shares.                                                                                                                   |
-| `VITE_APP_NAME`              | no       | Branding / window title. Defaults to `Customer Admin Portal`.                                                                                                                                           |
+| Variable                     | Required | Description                                                                                                                                                                                                                                                                 |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`          | yes      | Where API calls go (no trailing slash). `/api` in production, proxied by this app's nginx; `https://localhost:5001` for local IIS Express. The service does not enable CORS, so a different origin only works in development through Vite's proxy or a same-origin gateway. |
+| `VITE_API_CONTROLLER_PREFIX` | no       | Defaults to `/My`, the route every `ClientRemoteDatabaseAccessAPI` controller shares.                                                                                                                                                                                       |
+| `VITE_APP_NAME`              | no       | Branding / window title. Defaults to `Customer Admin Portal`.                                                                                                                                                                                                               |
+| `VITE_FEATURE_MIGRATIONS`    | no       | `true` routes the Migrations, Capacity and Customer moves pages. Off by default. Needs the backend's migrations 001 to 011.                                                                                                                                                 |
+
+Every other variable, and its default, is in `.env.example` and in the build-arg
+table in [deploy/README.md](./deploy/README.md).
 
 The API key is **not** a build-time variable; see below.
 
@@ -131,6 +137,11 @@ buffer. With `VITE_FEATURE_AUDIT_SINK` on and `VITE_AUDIT_SINK_URL` set,
 `src/lib/auditSink.ts` also POSTs each entry to that URL. When the backend
 ships an `admin_audit_log` endpoint, pointing the sink URL at it is the only
 change needed.
+
+The sink receives the admin API key: each POST carries the same `api-key`
+header as an API call. Whoever runs the sink URL can use it against every
+management endpoint, so trust it exactly like the API, and never point it at a
+third-party service.
 
 ## Project layout
 
@@ -187,16 +198,24 @@ LICENSE                     # Proprietary, internal-use-only license
 
 ## API surface used
 
-All endpoints live under `[Route("My")]`, shared by the eight controllers in the
-`erik/remote-database-access-authorization-b1-supertokens` branch of
-`crystalpm`, under `src/RemoteDatabaseAccessAuthorization/ClientRemoteDatabaseAccessAPI`.
+All endpoints live under `[Route("My")]`, shared by the eight controllers of
+`ClientRemoteDatabaseAccessAPI` in `crystalpm`, under
+`src/RemoteDatabaseAccessAuthorization/ClientRemoteDatabaseAccessAPI`. Shapes and
+refusals for each are in [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md).
 
 | Area             | Methods                                                                                                                                                                                                                                                                           |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Database servers | `GET /My/get-all-database-server-info`, `GET /My/get-database-server-info/{id}`, `POST /My/create-database-server-info`, `PUT /My/update-database-server-info`                                                                                                                    |
+| Database servers | `GET /My/get-all-database-server-info`, `GET /My/get-database-server-info/{id}`, `POST /My/create-database-server-info`, `PUT /My/update-database-server-info`, `POST /My/probe-database-server`                                                                                  |
 | Databases        | `GET /My/get-all-database-info`, `GET /My/get-database-info/{id}`, `POST /My/create-database-info`, `PUT /My/update-database-info`                                                                                                                                                |
 | Authorized users | `GET /My/get-users`, `GET /My/get-users/{serverId}/{dbId}`, `GET /My/get-user/{userId}`, `POST /My/create-user`, `PUT /My/update-user`, `DELETE /My/delete-user/{userId}`                                                                                                         |
 | Static DB users  | `GET /My/get-all-static-database-users`, `GET /My/get-static-database-users-by-server/{serverId}`, `GET /My/get-static-database-users-by-database/{dbId}`, `GET /My/get-static-database-user/{id}`, `POST /My/create-static-database-user`, `PUT /My/update-static-database-user` |
+| Capacity         | `GET /My/get-fleet-capacity`, `GET /My/get-server-capacity/{id}`, `GET /My/get-server-capacity-history/{id}`                                                                                                                                                                      |
+| Migrations       | `POST /My/create-migration-session`, `GET /My/get-migration-sessions`, `GET /My/get-migration-session/{id}`, `POST /My/revoke-migration-session/{id}`, `POST /My/discard-migration-target/{id}`                                                                                   |
+| Customer moves   | `POST /My/create-customer-move`, `GET /My/get-customer-moves`, `GET /My/get-customer-move/{id}`, `POST /My/cancel-customer-move/{id}`, `POST /My/roll-back-customer-move/{id}`, `POST /My/drop-customer-move-source/{id}`                                                         |
+
+The installer's `redeem-migration-key`, `migration-session/heartbeat` and
+`migration-session/complete`, and the CrystalPM client's authorization calls, are
+on the same routes but are not called by the portal.
 
 > Server, database, and static-user **delete** endpoints do not yet exist on
 > the backend. The portal ships full delete UI gated behind
@@ -271,9 +290,9 @@ The included `Dockerfile` produces a multi-stage build that ends at
 `nginxinc/nginx-unprivileged:1.27-alpine` listening on port `8080`.
 
 ```bash
-# Build for the gateway server's public hostname
+# API calls go to /api, which the image's nginx proxies to the service
 docker build \
-  --build-arg VITE_API_BASE_URL=https://remotedb.crystalpm.net \
+  --build-arg VITE_API_BASE_URL=/api \
   --build-arg VITE_APP_NAME="CrystalPM Admin Portal" \
   -t customer-admin-portal:latest .
 
@@ -292,8 +311,7 @@ CORS entirely and lets you serve everything from a single origin. Edit the
   `Referrer-Policy: no-referrer`, `Permissions-Policy`, and a strict
   `Content-Security-Policy` (no inline scripts; `connect-src` set to the
   gateway origin).
-- Long-lived caching for hashed assets, `no-store` for `index.html` and
-  `config.json`.
+- Long-lived caching for hashed assets, `no-store` for `index.html`.
 - gzip for text-y content types.
 
 ## Deploying to AWS (suggested)
@@ -308,7 +326,12 @@ Two flavors:
    browser can't reach the SPA without first authenticating to your IdP.
 4. The container's `/api/*` proxy reaches the gateway server over your VPC.
 
-### Static (S3 + CloudFront)
+### Static (S3 + CloudFront): not supported yet
+
+This layout needs the browser to call the API on another origin, and the
+service does not enable CORS, so every call would be blocked. It becomes
+possible once the API allows the portal's origin, or if CloudFront also routes
+`/api/*` to the service so that both share one origin. The steps, for then:
 
 1. `npm run build`.
 2. Upload `dist/` to a private S3 bucket.
@@ -316,9 +339,8 @@ Two flavors:
    404s) so React Router routes resolve.
 4. Restrict access via WAF (IP allowlist), CloudFront signed cookies, or an
    ALB / API Gateway in front.
-5. Set `VITE_API_BASE_URL` to the public URL of the gateway server (e.g.
-   `https://remotedb.crystalpm.net`) at build time. CORS must be enabled on
-   the gateway in this layout.
+5. Set `VITE_API_BASE_URL` at build time: `/api` if CloudFront routes it to
+   the service, or the service's own URL once it enables CORS for this origin.
 
 For environment-specific builds, copy `.env.example` to `.env.production`
 (or `.env.staging`) and run `npm run build -- --mode production`.

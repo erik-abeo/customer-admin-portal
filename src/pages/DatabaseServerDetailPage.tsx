@@ -5,6 +5,7 @@ import {
   Card,
   Container,
   Group,
+  Loader,
   Modal,
   SimpleGrid,
   Stack,
@@ -24,6 +25,7 @@ import { QueryStatus } from "@/components/common/QueryStatus";
 import { DatabaseServerForm } from "@/features/databaseServers/DatabaseServerForm";
 import {
   useDatabaseServer,
+  useDatabaseServerForEdit,
   useUpdateDatabaseServer,
 } from "@/features/databaseServers/queries";
 import { DatabaseForm } from "@/features/databases/DatabaseForm";
@@ -67,6 +69,8 @@ export function DatabaseServerDetailPage() {
   const updateServer = useUpdateDatabaseServer();
 
   const [editServerOpened, editServerCtl] = useDisclosure(false);
+  // The decrypted password and certificate are read only while the form is open.
+  const editServerQ = useDatabaseServerForEdit(editServerOpened ? serverId : undefined);
   const [createDbOpened, createDbCtl] = useDisclosure(false);
   const [editDbTarget, setEditDbTarget] = useState<DatabaseInfoItem | null>(null);
 
@@ -135,22 +139,11 @@ export function DatabaseServerDetailPage() {
                   </Badge>
                 </Fact>
                 <Fact label="SSL certificate">
-                  {/* The list placeholder carries no certificate, so wait for the by-id read. */}
                   <Badge
-                    color={
-                      serverQ.isPlaceholderData
-                        ? "gray"
-                        : server.Certificate
-                          ? "teal"
-                          : "gray"
-                    }
+                    color={server.HasCertificate ? "teal" : "gray"}
                     variant="light"
                   >
-                    {serverQ.isPlaceholderData
-                      ? "Checking"
-                      : server.Certificate
-                        ? "Loaded"
-                        : "None"}
+                    {server.HasCertificate ? "Loaded" : "None"}
                   </Badge>
                 </Fact>
               </SimpleGrid>
@@ -255,10 +248,10 @@ export function DatabaseServerDetailPage() {
         title="Edit server"
         size="lg"
       >
-        {/* Only the by-id result carries the stored password and certificate. */}
-        {server && !serverQ.isPlaceholderData && (
+        {!editServerQ.data && <Loader size="sm" aria-label="Loading server" />}
+        {editServerQ.data && (
           <DatabaseServerForm
-            initial={server}
+            initial={editServerQ.data}
             submitLabel="Save changes"
             onCancel={editServerCtl.close}
             submitting={updateServer.isPending}

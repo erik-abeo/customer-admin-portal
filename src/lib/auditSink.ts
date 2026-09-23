@@ -7,8 +7,11 @@
  * dev console warning) so a temporarily unavailable audit service can
  * never break the user's primary flow.
  *
+ * Each POST carries the same auth headers as an API call, which today means
+ * the admin api-key. The sink therefore has to be trusted like the API itself.
+ *
  * Backend contract is documented in `BACKEND-CONTRACT.md` under
- * "POST /admin-audit-log".
+ * "Optional audit-sink endpoint".
  */
 
 import { type AuditEntry, subscribeAuditEntries } from "./auditLog";
@@ -16,7 +19,12 @@ import { env, features } from "@/config/env";
 import { getAuthStrategy } from "@/api/httpClient";
 
 let installed = false;
-let lastForwardedTimestamp = "";
+/**
+ * Entries already sent, by identity. Two writes finishing in the same
+ * millisecond share a timestamp, so the timestamp cannot tell them apart; the
+ * buffer hands out the same entry objects in every snapshot, so identity can.
+ */
+const forwarded = new WeakSet<AuditEntry>();
 
 export function installAuditSink(): void {
   if (installed) return;
@@ -33,11 +41,11 @@ export function installAuditSink(): void {
   installed = true;
 
   subscribeAuditEntries((entries) => {
-    const newest = entries[entries.length - 1];
-    if (!newest) return;
-    if (newest.timestamp === lastForwardedTimestamp) return;
-    lastForwardedTimestamp = newest.timestamp;
-    void forward(newest);
+    for (const entry of entries) {
+      if (forwarded.has(entry)) continue;
+      forwarded.add(entry);
+      void forward(entry);
+    }
   });
 }
 

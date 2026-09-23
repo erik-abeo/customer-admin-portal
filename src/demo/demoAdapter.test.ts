@@ -218,6 +218,54 @@ describe("demo servers not taking new customers are refused as the service refus
   });
 });
 
+describe("demo discard refuses a target that is not this migration's to drop", () => {
+  // Session 503 failed after creating easyopti_0319 (202) on server 1.
+  it("refuses while another session on the database has not failed", async () => {
+    const retry = {
+      ...demoStore.migrationSessions.find((m) => m.Id === 503)!,
+      Id: 990,
+    };
+    retry.Status = "streaming";
+    demoStore.migrationSessions.push(retry);
+    try {
+      const res = await call("post", "/discard-migration-target/503");
+      expect(res.status).toBe(200);
+      expect(messageOf(res.data)).toBe(
+        "'easyopti_0319' is also the target of session 990 (streaming), so it is not this migration's to drop.",
+      );
+    } finally {
+      demoStore.migrationSessions = demoStore.migrationSessions.filter(
+        (m) => m.Id !== 990,
+      );
+    }
+  });
+
+  it("refuses while user mappings, static privileges or moves refer to it", async () => {
+    const user = demoStore.authorizedUsers[0]!;
+    const before = user.DatabaseMappings;
+    user.DatabaseMappings = [
+      ...(before ?? []),
+      { DatabaseServerId: 1, DatabaseId: 202 },
+    ];
+    demoStore.staticUserPrivileges[1] = [
+      ...(demoStore.staticUserPrivileges[1] ?? []),
+      { DatabaseId: 202, Privileges: [] } as never,
+    ];
+    try {
+      const res = await call("post", "/discard-migration-target/503");
+      expect((res.data as { Success: boolean }).Success).toBe(false);
+      expect(messageOf(res.data)).toBe(
+        "'easyopti_0319' is in use: 1 user mapping(s), 1 static user privilege(s) refer to it. Remove those first if it really is disposable.",
+      );
+    } finally {
+      user.DatabaseMappings = before;
+      demoStore.staticUserPrivileges[1] = demoStore.staticUserPrivileges[1]!.filter(
+        (p) => p.DatabaseId !== 202,
+      );
+    }
+  });
+});
+
 describe("demo discard refuses a target whose registration was repointed", () => {
   it("answers 409 while the registration names something else, and drops it once it does not", async () => {
     // Session 503 failed after creating easyopti_0319 (202) on server 1.

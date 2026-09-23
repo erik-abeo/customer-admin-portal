@@ -718,6 +718,41 @@ const ROUTES: Route[] = [
             Message: `The registration of database ${session.DatabaseId} has changed since this session created '${session.ProvisionDatabaseName}' on server ${session.DatabaseServerId}, so it is no longer this migration's to drop.`,
           },
         };
+      // A retry minted against this database streams into it. If one succeeded,
+      // or is still running, the database is the customer's now.
+      const others = demoStore.migrationSessions.filter(
+        (m) =>
+          m.Id !== session.Id &&
+          m.DatabaseId === session.DatabaseId &&
+          !["failed", "revoked", "expired"].includes(m.Status ?? ""),
+      );
+      if (others.length > 0)
+        return ok({
+          Success: false,
+          Message: `'${session.DatabaseName}' is also the target of ${others
+            .map((m) => `session ${m.Id} (${m.Status})`)
+            .join(", ")}, so it is not this migration's to drop.`,
+        });
+      // Counted as the service counts them, and described in the same words.
+      const userMappings = demoStore.authorizedUsers
+        .flatMap((u) => u.DatabaseMappings ?? [])
+        .filter((m) => m.DatabaseId === session.DatabaseId).length;
+      const staticPrivileges = Object.values(demoStore.staticUserPrivileges)
+        .flat()
+        .filter((p) => p.DatabaseId === session.DatabaseId).length;
+      const moves = demoStore.customerMoves.filter(
+        (m) => m.DatabaseId === session.DatabaseId,
+      ).length;
+      const dependents = [
+        userMappings > 0 ? `${userMappings} user mapping(s)` : null,
+        staticPrivileges > 0 ? `${staticPrivileges} static user privilege(s)` : null,
+        moves > 0 ? `${moves} move(s)` : null,
+      ].filter((part): part is string => part !== null);
+      if (dependents.length > 0)
+        return ok({
+          Success: false,
+          Message: `'${session.DatabaseName}' is in use: ${dependents.join(", ")} refer to it. Remove those first if it really is disposable.`,
+        });
       const dropped = session.DatabaseName ?? session.ProvisionDatabaseName;
       demoStore.databases = demoStore.databases.filter(
         (d) => d.Id !== session.DatabaseId,

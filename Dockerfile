@@ -4,15 +4,41 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-# Build-time variables wired into the bundle. Sensitive values (API keys)
-# are NOT baked in — they are entered by the operator at the login screen
-# and stored in sessionStorage. See README.
+# Every VITE_* variable the SPA reads (src/config/env.ts), wired into the
+# bundle at build time. There is no runtime configuration: a value not passed
+# here with --build-arg is baked in as its default, and changing one means
+# building a new image. .env files are not copied in (.dockerignore), so these
+# are the only way in. An empty value means the app's own default; see
+# deploy/README.md for each. The API key is NOT among them: the operator
+# enters it at the login screen and it lives in sessionStorage.
 ARG VITE_API_BASE_URL=/api
 ARG VITE_API_CONTROLLER_PREFIX=/My
-ARG VITE_APP_NAME=Customer\ Admin\ Portal
+ARG VITE_APP_NAME="Customer Admin Portal"
+ARG VITE_ENVIRONMENT=
+ARG VITE_DEMO_MODE=false
+ARG VITE_FEATURE_MIGRATIONS=false
+ARG VITE_FEATURE_EVENT_LOG=false
+ARG VITE_FEATURE_DELETES=false
+ARG VITE_FEATURE_RBAC=false
+ARG VITE_FEATURE_AUDIT_SINK=false
+ARG VITE_AUDIT_SINK_URL=
+ARG VITE_SENTRY_DSN=
+ARG VITE_IDLE_TIMEOUT_MINUTES=
+ARG VITE_IDLE_WARN_MINUTES=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_API_CONTROLLER_PREFIX=$VITE_API_CONTROLLER_PREFIX \
-    VITE_APP_NAME=$VITE_APP_NAME
+    VITE_APP_NAME=$VITE_APP_NAME \
+    VITE_ENVIRONMENT=$VITE_ENVIRONMENT \
+    VITE_DEMO_MODE=$VITE_DEMO_MODE \
+    VITE_FEATURE_MIGRATIONS=$VITE_FEATURE_MIGRATIONS \
+    VITE_FEATURE_EVENT_LOG=$VITE_FEATURE_EVENT_LOG \
+    VITE_FEATURE_DELETES=$VITE_FEATURE_DELETES \
+    VITE_FEATURE_RBAC=$VITE_FEATURE_RBAC \
+    VITE_FEATURE_AUDIT_SINK=$VITE_FEATURE_AUDIT_SINK \
+    VITE_AUDIT_SINK_URL=$VITE_AUDIT_SINK_URL \
+    VITE_SENTRY_DSN=$VITE_SENTRY_DSN \
+    VITE_IDLE_TIMEOUT_MINUTES=$VITE_IDLE_TIMEOUT_MINUTES \
+    VITE_IDLE_WARN_MINUTES=$VITE_IDLE_WARN_MINUTES
 
 # Install dependencies first for better layer caching.
 COPY package.json package-lock.json ./
@@ -42,10 +68,6 @@ COPY deploy/security-headers.conf /etc/nginx/snippets/security-headers.conf
 
 # The image's USER nginx (uid 101) cannot bind <1024; we listen on 8080.
 COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
-
-# Optional runtime config drop-in. If the operator mounts a /usr/share/nginx/
-# html/config.json file at deploy time, the SPA will pick it up and override
-# the build-time VITE_API_BASE_URL. See README.
 
 EXPOSE 8080
 

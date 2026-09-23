@@ -31,6 +31,10 @@ export function useCreateStaticUser() {
   return useMutation({
     mutationFn: (request: CreateStaticDatabaseUserRequest) =>
       staticUsersApi.create(request),
+    // The result holds the generated password in plain text. With no cache
+    // time it leaves the MutationCache as soon as the page resets the
+    // mutation, as the migration key does, rather than lingering five minutes.
+    gcTime: 0,
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
   });
 }
@@ -40,6 +44,8 @@ export function useUpdateStaticUser() {
   return useMutation({
     mutationFn: (request: UpdateStaticDatabaseUserRequest) =>
       staticUsersApi.update(request),
+    // A rotation's result holds the new password; see useCreateStaticUser.
+    gcTime: 0,
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(variables.Id) });

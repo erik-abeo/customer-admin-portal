@@ -65,6 +65,23 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Throws when a read answered 200 with `Success: false`.
+ *
+ * Some reads report failure in the body rather than the status: `get-users`,
+ * `get-users/{server}/{db}` and `get-user` return 200 with `Success: false` and
+ * a null list when the service could not read users. Treating that null as an
+ * empty list shows a failed read as "no users", so it is thrown instead, with
+ * the service's `Message`, and surfaces like any other failed load.
+ */
+export function requireSuccess<T extends { Success: boolean; Message: string | null }>(
+  data: T,
+  fallback: string,
+): T {
+  if (!data.Success) throw new ApiError(data.Message?.trim() || fallback, 200, data);
+  return data;
+}
+
 function buildBaseUrl(): string {
   const base = env.apiBaseUrl.replace(/\/+$/, "");
   const prefix = env.apiControllerPrefix.startsWith("/")
@@ -167,8 +184,24 @@ export function messageFromBody(data: unknown): string | undefined {
     const value = body[key];
     if (typeof value === "string" && value.trim().length > 0) return value;
   }
+  // create-user, update-user and delete-user pass a refusing SuperTokens
+  // response through as the 400 body, which carries only a status code.
+  const status = body.Status ?? body.status;
+  if (typeof status === "string" && status.trim() && status !== "OK")
+    return (
+      SUPERTOKENS_STATUS_MESSAGES[status] ??
+      `The sign-in service refused the change (${status}).`
+    );
   return undefined;
 }
+
+/** The SuperTokens refusals the user-management endpoints pass through. */
+const SUPERTOKENS_STATUS_MESSAGES: Record<string, string> = {
+  EMAIL_ALREADY_EXISTS_ERROR: "A user with that email address already exists.",
+  UNKNOWN_USER_ID_ERROR: "That user no longer exists in the sign-in service.",
+  PASSWORD_POLICY_VIOLATED_ERROR: "That password does not meet the password policy.",
+  EMAIL_CHANGE_NOT_ALLOWED_ERROR: "That user's email address cannot be changed.",
+};
 
 httpClient.interceptors.response.use(
   (response: AxiosResponse) => {

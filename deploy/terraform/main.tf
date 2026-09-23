@@ -38,19 +38,19 @@ variable "environment" {
 }
 
 variable "ecs_cluster_name" {
-  type    = string
+  type = string
 }
 
 variable "vpc_id" {
-  type    = string
+  type = string
 }
 
 variable "private_subnet_ids" {
-  type    = list(string)
+  type = list(string)
 }
 
 variable "alb_listener_arn" {
-  type    = string
+  type = string
 }
 
 variable "host_header" {
@@ -63,15 +63,9 @@ variable "image_tag" {
   default = "latest"
 }
 
-variable "sentry_dsn_secret_arn" {
-  type    = string
-  default = ""
-}
-
-variable "audit_sink_url_secret_arn" {
-  type    = string
-  default = ""
-}
+# The SPA's settings, including the Sentry DSN and the audit sink URL, are
+# compiled into the bundle when the image is built (see the Dockerfile's ARGs).
+# Nothing set on the running task reaches the app, so none is set here.
 
 # ---- ECR ---------------------------------------------------------------
 
@@ -151,25 +145,6 @@ resource "aws_iam_role" "task" {
   tags               = local.tags
 }
 
-# Permit reading the secrets used by the task at startup.
-data "aws_iam_policy_document" "secrets" {
-  count = (var.sentry_dsn_secret_arn != "" || var.audit_sink_url_secret_arn != "") ? 1 : 0
-  statement {
-    actions = ["secretsmanager:GetSecretValue"]
-    resources = compact([
-      var.sentry_dsn_secret_arn,
-      var.audit_sink_url_secret_arn,
-    ])
-  }
-}
-
-resource "aws_iam_role_policy" "execution_secrets" {
-  count  = (var.sentry_dsn_secret_arn != "" || var.audit_sink_url_secret_arn != "") ? 1 : 0
-  name   = "secrets-read"
-  role   = aws_iam_role.execution.id
-  policy = data.aws_iam_policy_document.secrets[0].json
-}
-
 # ---- Task definition ---------------------------------------------------
 
 locals {
@@ -178,15 +153,6 @@ locals {
     environment = var.environment
     managed_by  = "terraform"
   }
-
-  optional_secrets = compact([
-    var.sentry_dsn_secret_arn != "" ? jsonencode({
-      name = "VITE_SENTRY_DSN", valueFrom = var.sentry_dsn_secret_arn
-    }) : "",
-    var.audit_sink_url_secret_arn != "" ? jsonencode({
-      name = "VITE_AUDIT_SINK_URL", valueFrom = var.audit_sink_url_secret_arn
-    }) : "",
-  ])
 }
 
 resource "aws_ecs_task_definition" "this" {
@@ -199,17 +165,13 @@ resource "aws_ecs_task_definition" "this" {
   task_role_arn            = aws_iam_role.task.arn
 
   container_definitions = jsonencode([{
-    name      = "web"
-    image     = "${aws_ecr_repository.this.repository_url}:${var.image_tag}"
-    essential = true
-    user      = "101"
+    name         = "web"
+    image        = "${aws_ecr_repository.this.repository_url}:${var.image_tag}"
+    essential    = true
+    user         = "101"
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
     environment = [
-      { name = "NODE_ENV", value = "production" },
       { name = "TZ", value = "UTC" },
-    ]
-    secrets = [
-      for s in local.optional_secrets : jsondecode(s)
     ]
     healthCheck = {
       command     = ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
@@ -290,12 +252,12 @@ resource "aws_ecs_service" "this" {
   enable_execute_command             = false
 
   lifecycle {
-    ignore_changes = [task_definition]  # let CI roll new image tags
+    ignore_changes = [task_definition] # let CI roll new image tags
   }
 
   tags = local.tags
 }
 
 output "ecr_repo_url" { value = aws_ecr_repository.this.repository_url }
-output "log_group"    { value = aws_cloudwatch_log_group.this.name }
+output "log_group" { value = aws_cloudwatch_log_group.this.name }
 output "service_name" { value = aws_ecs_service.this.name }
