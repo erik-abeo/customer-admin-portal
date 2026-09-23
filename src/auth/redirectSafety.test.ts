@@ -35,6 +35,13 @@ describe("safeRedirect", () => {
     expect(safeRedirect("%2F%5Cevil.com")).toBe("/");
   });
 
+  it("returns / for a backslash or control character anywhere in the path", () => {
+    expect(safeRedirect("/databases\\evil.com")).toBe("/");
+    expect(safeRedirect("%2F%09%2Fevil.com")).toBe("/");
+    expect(safeRedirect("/\n/evil.com")).toBe("/");
+    expect(safeRedirect("%2Fdatabases%00")).toBe("/");
+  });
+
   it("returns / on malformed percent-encoding", () => {
     expect(safeRedirect("%E0%A4%A")).toBe("/");
   });

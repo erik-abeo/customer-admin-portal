@@ -79,19 +79,24 @@ talks to the ClientRemoteDatabaseAccessAPI over HTTPS.
 ## Dependency posture
 
 - Dependencies are updated weekly via Dependabot (`.github/dependabot.yml`).
-- `npm audit --omit=dev` runs in CI on every PR; CI fails on `high` or
-  `critical` advisories.
+- CI runs `npm audit --omit=dev --audit-level=high`, so a high or critical
+  advisory in a production dependency fails the build. Two moderate
+  `react-router` advisories remain, fixed only in v7. One concerns server-side
+  rendering, which this SPA does not use; the other is an open redirect through
+  a backslash in a navigation target, and the only target a user can influence,
+  the post-login `redirect`, is refused by `safeRedirect` if it contains a
+  backslash or a control character anywhere.
 - Production dependencies are pinned in `package-lock.json`. Major bumps are
   reviewed by hand before merging.
 
 ## Threat model (abridged)
 
-| Threat                                  | Mitigation                                                                  |
-| --------------------------------------- | --------------------------------------------------------------------------- |
-| Stolen API key                          | sessionStorage only; idle sign-out; HTTPS-only transport                    |
-| XSS via injected content in admin input | React escapes by default; CSP forbids `unsafe-inline` / `unsafe-eval`       |
-| CSRF                                    | API requires the `api-key` header — cookies aren't used                     |
-| Open redirect on `/login?redirect=`     | `safeRedirect` (`src/auth/redirectSafety.ts`) rejects absolute / `//` paths |
-| Source-map exposure                     | Vite emits `hidden` maps; Dockerfile strips `*.map` before publishing       |
-| Cross-tab session drift                 | `storage` event listener mirrors sign-in/out across tabs                    |
-| Inactive workstation                    | `useIdleSignOut` warning + automatic sign-out after threshold               |
+| Threat                                  | Mitigation                                                                                                                                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stolen API key                          | sessionStorage only; idle sign-out; HTTPS-only transport                                                                                                                                                     |
+| XSS via injected content in admin input | React escapes by default; CSP forbids `unsafe-inline` / `unsafe-eval`                                                                                                                                        |
+| CSRF                                    | API requires the `api-key` header; cookies aren't used                                                                                                                                                       |
+| Open redirect on `/login?redirect=`     | `safeRedirect` (`src/auth/redirectSafety.ts`) rejects absolute / `//` paths                                                                                                                                  |
+| Source-map exposure                     | Vite emits `hidden` maps; Dockerfile strips `*.map` before publishing                                                                                                                                        |
+| Cross-tab session drift                 | None: each tab holds its own session in `sessionStorage`, whose changes never reach another tab, so signing out in one tab does not sign out the others. Close the other tabs, or rely on the idle sign-out. |
+| Inactive workstation                    | `useIdleSignOut` warning + automatic sign-out after threshold                                                                                                                                                |

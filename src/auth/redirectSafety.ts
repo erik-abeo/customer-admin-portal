@@ -8,6 +8,9 @@
  *     naive `startsWith("/")` check.
  *   - Backslash-escaped variants (`/\evil.com`) → some legacy parsers
  *     normalize these to `//evil.com`.
+ *   - A backslash or control character anywhere. Browsers strip tabs and
+ *     newlines from URLs, so `/<tab>/evil.com` becomes `//evil.com`, and
+ *     React Router 6 has open-redirect advisories for backslashes in paths.
  *   - Malformed percent-encodings.
  */
 export function safeRedirect(raw: string | null | undefined): string {
@@ -21,5 +24,7 @@ export function safeRedirect(raw: string | null | undefined): string {
   if (!decoded.startsWith("/")) return "/";
   if (decoded.startsWith("//")) return "/";
   if (decoded.startsWith("/\\")) return "/";
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\u0000-\u001f\u007f]/.test(decoded)) return "/";
   return decoded;
 }
