@@ -10,6 +10,7 @@ import type {
 
 import { emptyPrivileges } from "@/api/types";
 
+import { DUPLICATE_CUSTOMER_REFUSED_MESSAGE } from "@/features/databases/editGuard";
 import { refusedOutright } from "@/features/staticUsers/outcome";
 
 import { demoAdapter } from "./demoAdapter";
@@ -688,19 +689,22 @@ describe("demo mappings follow their database", () => {
 
 describe("demo move planning", () => {
   it("leaves the database active until the move starts draining", async () => {
+    // Earlier tests in this file may have planned a move of 101; start clean so
+    // the plan is always accepted and the assertion always runs.
+    demoStore.customerMoves = demoStore.customerMoves.filter(
+      (m) => m.DatabaseId !== 101,
+    );
+    const db = demoStore.databases.find((d) => d.Id === 101)!;
+    db.Status = "active";
     const before = demoStore.customerMoves.length;
     const res = await call(
       "post",
       "/create-customer-move",
       move({ DatabaseId: 101, TargetDatabaseServerId: 3 }),
     );
-    if ((res.data as { Success: boolean }).Success) {
-      expect(demoStore.customerMoves.length).toBe(before + 1);
-      expect(demoStore.databases.find((d) => d.Id === 101)?.Status).toBe("active");
-    } else {
-      // An earlier test already moved it; planning must still not mark it moving.
-      expect(demoStore.databases.find((d) => d.Id === 101)?.Status).not.toBe("moving");
-    }
+    expect(res.data).toMatchObject({ Success: true });
+    expect(demoStore.customerMoves.length).toBe(before + 1);
+    expect(demoStore.databases.find((d) => d.Id === 101)?.Status).toBe("active");
   });
 });
 
@@ -923,5 +927,88 @@ describe("demo answers stale ids as the service does", () => {
     expect(empty.data).toBe(
       "Invalid request. Id, UserName, and Server information are required.",
     );
+  });
+});
+
+describe("demo database registration", () => {
+  it("refuses a second database for the same customer on one server with the service's 409", async () => {
+    const existing = demoStore.databases[0];
+    const res = await call("post", "/create-database-info", {
+      DatabaseServerId: existing.DatabaseServerId,
+      DatabaseName: "second_for_customer",
+      Description: null,
+      CrystalPmId: existing.CrystalPmId,
+    });
+    expect(res.status).toBe(409);
+    expect(res.data).toEqual({
+      Success: false,
+      Message: DUPLICATE_CUSTOMER_REFUSED_MESSAGE,
+    });
+    expect(
+      demoStore.databases.some((d) => d.DatabaseName === "second_for_customer"),
+    ).toBe(false);
+  });
+
+  it("refuses an update that would give a customer a second database on a server", async () => {
+    const serverId = demoStore.servers[0].Id;
+    demoStore.databases.push(
+      {
+        Id: 99101,
+        DatabaseServerId: serverId,
+        DatabaseName: "dup_a",
+        Description: null,
+        CrystalPmId: 777001,
+        Status: "active",
+      },
+      {
+        Id: 99102,
+        DatabaseServerId: serverId,
+        DatabaseName: "dup_b",
+        Description: null,
+        CrystalPmId: 777002,
+        Status: "active",
+      },
+    );
+    try {
+      const res = await call("put", "/update-database-info", {
+        Id: 99102,
+        DatabaseName: "dup_b",
+        CrystalPmId: 777001,
+      });
+      expect(res.status).toBe(409);
+      expect(res.data).toEqual({
+        Success: false,
+        Message: DUPLICATE_CUSTOMER_REFUSED_MESSAGE,
+      });
+      expect(demoStore.databases.find((d) => d.Id === 99102)?.CrystalPmId).toBe(777002);
+    } finally {
+      demoStore.databases = demoStore.databases.filter(
+        (d) => d.Id !== 99101 && d.Id !== 99102,
+      );
+    }
+  });
+
+  it("treats a move's target name case-insensitively when minting, as the service does", async () => {
+    const target = demoStore.servers[1].Id;
+    demoStore.customerMoves.push({
+      Id: 9901,
+      DatabaseId: -1,
+      TargetDatabaseServerId: target,
+      TargetDatabaseName: "tenant_case_check",
+      Status: "planned",
+    } as never);
+    try {
+      const res = await call("post", "/create-migration-session", {
+        DatabaseServerId: target,
+        CrystalPmId: 424242,
+        DatabaseName: "Tenant_Case_Check",
+      });
+      expect(res.status).toBe(400);
+      expect(String((res.data as { Message: string }).Message)).toContain(
+        "copying into",
+      );
+    } finally {
+      demoStore.customerMoves = demoStore.customerMoves.filter((m) => m.Id !== 9901);
+    }
   });
 });

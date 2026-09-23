@@ -160,14 +160,11 @@ describe("useListTable", () => {
     expect(result.current.rows.map((r) => r.Id)).toEqual([2, 1, 3]);
   });
 
-  it("paginates and clamps page when filtered total shrinks", async () => {
-    const { result } = renderHook(() =>
-      useListTable<Row>({
-        data: rows,
-        searchableFields: SEARCHABLE,
-        defaultPageSize: 2,
-        searchDebounceMs: 0,
-      }),
+  it("paginates and clamps page when the data shrinks", async () => {
+    const { result, rerender } = renderHook(
+      ({ data }: { data: Row[] }) =>
+        useListTable<Row>({ data, defaultPageSize: 2, searchDebounceMs: 0 }),
+      { initialProps: { data: rows } },
     );
 
     expect(result.current.pageCount).toBe(3);
@@ -178,16 +175,57 @@ describe("useListTable", () => {
     });
     expect(result.current.rows).toHaveLength(1);
 
+    rerender({ data: rows.slice(0, 3) });
+    expect(result.current.pageCount).toBe(2);
+    await waitFor(() => {
+      expect(result.current.page).toBe(2);
+    });
+  });
+
+  it("returns to the first page when the search changes, so no match is hidden", async () => {
+    const { result } = renderHook(() =>
+      useListTable<Row>({
+        data: rows,
+        searchableFields: SEARCHABLE,
+        defaultPageSize: 2,
+        searchDebounceMs: 0,
+      }),
+    );
+
+    act(() => {
+      result.current.setPage(3);
+    });
+    expect(result.current.page).toBe(3);
+
     act(() => {
       result.current.setSearch("desc");
     });
     await waitFor(() => {
       expect(result.current.filteredCount).toBe(3);
     });
-    expect(result.current.pageCount).toBe(2);
     await waitFor(() => {
-      expect(result.current.page).toBe(2);
+      expect(result.current.page).toBe(1);
     });
+    expect(result.current.rows.map((r) => r.Id)).toEqual([1, 3]);
+  });
+
+  it("returns to the first page when the filter changes", () => {
+    const evens = (r: Row) => r.Id % 2 === 0;
+    const all = (_r: Row) => true;
+    const { result, rerender } = renderHook(
+      ({ filter }: { filter: (r: Row) => boolean }) =>
+        useListTable<Row>({ data: rows, filter, defaultPageSize: 1 }),
+      { initialProps: { filter: all } },
+    );
+
+    act(() => {
+      result.current.setPage(2);
+    });
+    expect(result.current.page).toBe(2);
+
+    rerender({ filter: evens });
+    expect(result.current.page).toBe(1);
+    expect(result.current.rows.map((r) => r.Id)).toEqual([2]);
   });
 
   it("filteredRows includes every match (ignores pagination) for CSV export", async () => {

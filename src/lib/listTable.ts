@@ -23,7 +23,7 @@
  *     can export the visible filter, not just the visible page.
  */
 import { useDebouncedValue } from "@mantine/hooks";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type SortDirection = "asc" | "desc";
 
@@ -226,6 +226,17 @@ export function useListTable<T, K extends string = string>(
       setPage(pageCount);
     }
   }, [page, pageCount]);
+
+  // A new search or filter starts again from the first page. Staying on page 5
+  // of the new results would hide the first matches and read as "not found".
+  // Callers pass a stable (memoized) filter, so this fires only on a real change.
+  const lastCriteria = useRef({ search: debouncedSearch, filter });
+  useEffect(() => {
+    const last = lastCriteria.current;
+    if (last.search === debouncedSearch && last.filter === filter) return;
+    lastCriteria.current = { search: debouncedSearch, filter };
+    setPage(1);
+  }, [debouncedSearch, filter]);
 
   // 4. Page slice -----------------------------------------------------
   const rows = useMemo<T[]>(() => {

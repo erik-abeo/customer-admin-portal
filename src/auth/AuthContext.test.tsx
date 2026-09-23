@@ -1,7 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render as rtlRender, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const overlays = vi.hoisted(() => ({ closeAll: vi.fn(), clean: vi.fn() }));
+vi.mock("@mantine/modals", () => ({ modals: { closeAll: overlays.closeAll } }));
+vi.mock("@mantine/notifications", () => ({ notifications: { clean: overlays.clean } }));
 
 import { getAdminName, getAuthStrategy } from "@/api/httpClient";
 import { features } from "@/config/env";
@@ -59,6 +63,28 @@ describe("AuthProvider", () => {
 
   afterEach(() => {
     sessionStorage.clear();
+  });
+
+  it("closes open dialogs and warnings at sign-in and sign-out, so none runs under the next admin", () => {
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    overlays.closeAll.mockClear();
+    overlays.clean.mockClear();
+
+    act(() => {
+      screen.getByText("in").click();
+    });
+    expect(overlays.closeAll).toHaveBeenCalledTimes(1);
+    expect(overlays.clean).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      screen.getByText("out").click();
+    });
+    expect(overlays.closeAll).toHaveBeenCalledTimes(2);
+    expect(overlays.clean).toHaveBeenCalledTimes(2);
   });
 
   it("drops the RBAC role at sign-in and sign-out, so it cannot outlive its session", () => {

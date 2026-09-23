@@ -31,7 +31,8 @@ const database = (): DatabaseInfoItem => ({
   DatabaseName: "tenant_acme",
   Description: null,
   CrystalPmId: 11111,
-  Status: "moving",
+  // Active, as a planned move leaves it: draining is what takes it offline.
+  Status: "active",
 });
 
 const move = (): CustomerMove =>

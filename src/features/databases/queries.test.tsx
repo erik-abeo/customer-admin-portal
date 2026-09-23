@@ -164,5 +164,6 @@ describe("useUpdateDatabase", () => {
     const keys = spy.mock.calls.map(([filters]) => filters?.queryKey);
     expect(keys).toContainEqual(["authorized-users"]);
     expect(keys).toContainEqual(["static-users"]);
+    expect(keys).toContainEqual(["migration-sessions"]);
   });
 });

@@ -92,6 +92,9 @@ export function useUpdateDatabase() {
       // server, and the per-database user reads are keyed by server.
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
       qc.invalidateQueries({ queryKey: ["static-users"] });
+      // Migration sessions show the database's name and server, read live, and
+      // the discard confirm quotes both.
+      qc.invalidateQueries({ queryKey: ["migration-sessions"] });
     },
   });
 }

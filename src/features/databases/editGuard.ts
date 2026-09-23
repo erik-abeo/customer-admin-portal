@@ -22,6 +22,10 @@ export const STATIC_USERS_REFUSED_MESSAGE =
   "This database's server or name cannot be changed while static users hold privileges on it, because their grants " +
   "are on its current server. Remove those static user grants first, then try again. Nothing was saved.";
 
+export const DUPLICATE_CUSTOMER_REFUSED_MESSAGE =
+  "That customer already has a database registered on this server, and a customer can have only one database " +
+  "per server. Nothing was saved.";
+
 export const RUNNING_MIGRATION_REFUSED_MESSAGE =
   "This database's server or name cannot be changed while a migration is streaming into it, because the installer " +
   "is writing to its current server. Wait for the migration to finish, or revoke it, then try again. Nothing was saved.";

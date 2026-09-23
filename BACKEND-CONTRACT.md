@@ -342,6 +342,14 @@ the one entered, and the move picker one whose earlier move has cut over and
 not been settled or rolled back. The
 refusal stays the backstop for a status that changed after the list was loaded.
 
+**One database per customer per server.** `database_info` has a unique key on
+server and `CrystalPmId`, so a `create-database-info` or `update-database-info`
+that would give a customer a second database on a server answers **409** with
+`Success: false` and nothing saved:
+
+> That customer already has a database registered on this server, and a customer
+> can have only one database per server. Nothing was saved.
+
 **Updating a database** (`update-database-info`) skips blank strings, as the
 server update does, so `Description` cannot be cleared through it. An unknown
 `Id` updates no row and answers 200 with `Success: false` ("Failed to update

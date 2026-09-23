@@ -138,6 +138,10 @@ export function useUpdateDatabaseServer() {
       qc.invalidateQueries({ queryKey: KEYS.detail(variables.Id) });
       // Name and address show in, and are measured by, the capacity reading.
       qc.invalidateQueries({ queryKey: ["server-capacity"] });
+      // Moves and migration sessions read the server's name live, and the
+      // destructive confirms (drop source, discard) quote it.
+      qc.invalidateQueries({ queryKey: ["customer-moves"] });
+      qc.invalidateQueries({ queryKey: ["migration-sessions"] });
     },
   });
 }

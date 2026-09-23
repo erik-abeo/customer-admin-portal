@@ -63,6 +63,7 @@ import type {
 } from "@/api/types";
 
 import {
+  DUPLICATE_CUSTOMER_REFUSED_MESSAGE,
   RELOCATION_REFUSED_MESSAGE,
   RUNNING_MIGRATION_REFUSED_MESSAGE,
   STATIC_USERS_REFUSED_MESSAGE,
@@ -335,7 +336,7 @@ function mintRefusal(req: CreateMigrationSessionRequest): string | null {
     const copyingInto = demoStore.customerMoves.some(
       (m) =>
         m.TargetDatabaseServerId === req.DatabaseServerId &&
-        (m.TargetDatabaseName ?? "") === name &&
+        (m.TargetDatabaseName ?? "").toLowerCase() === name.toLowerCase() &&
         ACTIVE_MOVE_STATUSES.has(m.Status ?? ""),
     );
     if (copyingInto)
@@ -1214,6 +1215,19 @@ const ROUTES: Route[] = [
     pattern: /^\/create-database-info$/,
     handle: ({ body }) => {
       const req = body as CreateDatabaseInfoRequest;
+      // As the service: one database per customer per server (its unique key),
+      // refused with 409.
+      if (
+        demoStore.databases.some(
+          (d) =>
+            d.DatabaseServerId === req.DatabaseServerId &&
+            d.CrystalPmId === req.CrystalPmId,
+        )
+      )
+        return {
+          status: 409,
+          data: { Success: false, Message: DUPLICATE_CUSTOMER_REFUSED_MESSAGE },
+        };
       const next: DatabaseInfoItem = {
         Id: demoStore.databaseIds.next(),
         DatabaseServerId: req.DatabaseServerId,
@@ -1267,12 +1281,25 @@ const ROUTES: Route[] = [
         return ok({ Success: false, Message: STATIC_USERS_REFUSED_MESSAGE });
       if (relocating && streaming)
         return ok({ Success: false, Message: RUNNING_MIGRATION_REFUSED_MESSAGE });
+      const crystalPmId = req.CrystalPmId ?? current.CrystalPmId;
+      if (
+        demoStore.databases.some(
+          (d) =>
+            d.Id !== current.Id &&
+            d.DatabaseServerId === serverId &&
+            d.CrystalPmId === crystalPmId,
+        )
+      )
+        return {
+          status: 409,
+          data: { Success: false, Message: DUPLICATE_CUSTOMER_REFUSED_MESSAGE },
+        };
       demoStore.databases[idx] = {
         ...current,
         DatabaseServerId: serverId,
         DatabaseName: name,
         Description: req.Description?.trim() ? req.Description : current.Description,
-        CrystalPmId: req.CrystalPmId ?? current.CrystalPmId,
+        CrystalPmId: crystalPmId,
       };
       demoStore.recordAdminEvent(
         `Updated database ${demoStore.databases[idx].DatabaseName}`,

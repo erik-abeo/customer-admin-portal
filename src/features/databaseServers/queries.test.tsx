@@ -23,6 +23,7 @@ import {
   useCreateDatabaseServer,
   useDatabaseServers,
   useProbeDatabaseServer,
+  useUpdateDatabaseServer,
 } from "./queries";
 
 vi.mock("@/api/databaseServers", () => ({
@@ -303,5 +304,25 @@ describe("server mutations holding the admin password", () => {
     expect(holds(client, "Create-Pass-2")).toBe(true);
     act(() => result.current.reset());
     await waitFor(() => expect(holds(client, "Create-Pass-2")).toBe(false));
+  });
+});
+
+describe("useUpdateDatabaseServer", () => {
+  it("refreshes moves and migration sessions, which show the server's name", async () => {
+    vi.mocked(databaseServersApi.update).mockResolvedValue({
+      Success: true,
+      Message: null,
+    } as never);
+    const client = new QueryClient();
+    const spy = vi.spyOn(client, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateDatabaseServer(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await act(() => result.current.mutateAsync({ Id: 7 } as never));
+    const keys = spy.mock.calls.map(([filters]) => filters?.queryKey);
+    expect(keys).toContainEqual(["customer-moves"]);
+    expect(keys).toContainEqual(["migration-sessions"]);
   });
 });

@@ -1,3 +1,5 @@
+import { modals } from "@mantine/modals";
+import { notifications } from "@mantine/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
@@ -18,6 +20,15 @@ import { setCurrentRole } from "@/auth/roles";
 import { clearAuditEntries } from "@/lib/auditLog";
 
 const STORAGE_KEY = "cap.auth.v1";
+
+// Confirm dialogs and persistent warnings live above the router, so a route
+// change does not remove them. One left open across a sign-out would still show
+// its customer, database and server over the login page, and a click after the
+// next sign-in would run its action under the next admin's key.
+function dismissSessionOverlays(): void {
+  modals.closeAll();
+  notifications.clean();
+}
 
 interface StoredAuth {
   adminName: string;
@@ -108,6 +119,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         apiKey: apiKey.trim(),
       };
       if (!sameIdentity(current.current, next)) queryClient.clear();
+      dismissSessionOverlays();
       // A role belongs to the session that received it: the next admin's
       // comes with their first response.
       setCurrentRole(null);
@@ -131,6 +143,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     queryClient.clear();
     clearAuditEntries();
     setCurrentRole(null);
+    dismissSessionOverlays();
   }, [queryClient]);
 
   const value = useMemo<AuthState>(
