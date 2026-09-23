@@ -4,6 +4,7 @@ import type { DatabaseServerInfoItem, ProbeDatabaseServerResponse } from "@/api/
 
 import {
   canSubmitServer,
+  changedSecrets,
   connectionChanged,
   effectiveConnection,
   probeSslMode,
@@ -119,5 +120,47 @@ describe("probeSslMode", () => {
         effectiveConnection({ ...unchanged, Certificate: "", RootUserPassword: "x" }),
       ),
     ).toBe("Required");
+  });
+});
+
+describe("changedSecrets", () => {
+  it("sends nothing back for an edit that leaves the password and certificate alone", () => {
+    // What the edit form opens with: a blank password and the stored certificate.
+    expect(changedSecrets(unchanged, stored)).toEqual({
+      RootUserPassword: null,
+      Certificate: null,
+    });
+  });
+
+  it("never writes back the values the form was opened with", () => {
+    // Somebody rotated both since this form loaded; retyping or leaving the old
+    // values in must not undo that.
+    expect(
+      changedSecrets({ ...unchanged, RootUserPassword: "Stored-Pass-1!" }, stored),
+    ).toEqual({ RootUserPassword: null, Certificate: null });
+  });
+
+  it("sends a new password or certificate the operator typed", () => {
+    const certificate = [
+      "-----BEGIN CERTIFICATE-----",
+      "BBB",
+      "-----END CERTIFICATE-----",
+    ].join("\n");
+    expect(
+      changedSecrets(
+        {
+          ...unchanged,
+          RootUserPassword: "New-Pass-2!",
+          Certificate: `  ${certificate}  `,
+        },
+        stored,
+      ),
+    ).toEqual({ RootUserPassword: "New-Pass-2!", Certificate: certificate });
+  });
+
+  it("treats a cleared certificate as keeping the stored one", () => {
+    expect(
+      changedSecrets({ ...unchanged, Certificate: "   " }, stored).Certificate,
+    ).toBeNull();
   });
 });

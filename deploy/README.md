@@ -7,11 +7,12 @@ introducing a parallel one.
 
 ## Files
 
-| File                       | Purpose                                                                                                                                                                                                                                                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nginx.conf`               | nginx site config used inside the container. SPA fallback, immutable asset caching, `/healthz`, security headers (CSP, HSTS, COOP, CORP, XCTO, X-Frame-Options, Referrer-Policy, Permissions-Policy), gzip, and an optional `/api/` reverse proxy to the gateway. |
-| `ecs-task-definition.json` | Hand-edit AWS ECS Fargate task definition (no Terraform required). Wires CloudWatch logs, secrets injection (Sentry DSN, audit-sink URL), `/healthz` ECS healthcheck, rootless user (uid 101).                                                                    |
-| `terraform/`               | Terraform skeleton (ECR + log group + IAM + task definition + ALB target group + ECS service). Reusable starting point — assumes a VPC + internal ALB + ECS cluster already exist.                                                                                |
+| File                       | Purpose                                                                                                                                                                                                               |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nginx.conf`               | nginx site config used inside the container. SPA fallback, immutable asset caching, `/healthz`, security headers (included from `security-headers.conf`), gzip, and an optional `/api/` reverse proxy to the gateway. |
+| `security-headers.conf`    | CSP, HSTS, COOP, CORP, XCTO, X-Frame-Options, Referrer-Policy and Permissions-Policy. Included at server level and in every location that adds its own header, because nginx drops inherited headers in those.        |
+| `ecs-task-definition.json` | Hand-edit AWS ECS Fargate task definition (no Terraform required). Wires CloudWatch logs, secrets injection (Sentry DSN, audit-sink URL), `/healthz` ECS healthcheck, rootless user (uid 101).                        |
+| `terraform/`               | Terraform skeleton (ECR + log group + IAM + task definition + ALB target group + ECS service). Reusable starting point — assumes a VPC + internal ALB + ECS cluster already exist.                                    |
 
 ## Image build
 

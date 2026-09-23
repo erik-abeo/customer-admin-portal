@@ -48,19 +48,37 @@ export const canDropMoveSource = (move: CustomerMove): boolean =>
   (move.Status === "flipped" || move.Status === "settled") && hasRecordedSource(move);
 
 /**
+ * Whether a move still holds the customer, by the service's own rule
+ * (`UnsettledCondition` in CustomerMoveRepository): planned, draining, copying,
+ * verifying or flipped, or settled by a source drop that has not finished. While
+ * one does, the service refuses another move of the same database.
+ */
+export const isUnsettledMove = (move: CustomerMove): boolean =>
+  ["planned", "draining", "copying", "verifying", "flipped"].includes(
+    move.Status ?? "",
+  ) ||
+  (move.Status === "settled" && !move.SourceDroppedDateTimeUtc);
+
+/**
  * Why a database cannot be moved now, or null when it can: it is not active, or
- * an earlier move of it has cut over and not been settled or rolled back. After
- * a flip the database is active again on the target, so status alone does not
- * catch the second; the service refuses it for the same reason.
+ * an earlier move of it is still unsettled. After a flip the database is active
+ * again on the target, so status alone does not catch the second.
  */
 export const whyDatabaseNotMovable = (
   database: DatabaseInfoItem,
   moves: ReadonlyArray<CustomerMove>,
-): string | null =>
-  whyDatabaseUnavailable(database.Status) ??
-  (moves.some((m) => m.DatabaseId === database.Id && m.Status === "flipped")
-    ? "a cut-over move has not been settled or rolled back"
-    : null);
+): string | null => {
+  const unavailable = whyDatabaseUnavailable(database.Status);
+  if (unavailable) return unavailable;
+  const unsettled = moves.find(
+    (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
+  );
+  if (!unsettled) return null;
+  if (unsettled.Status === "flipped")
+    return "a cut-over move has not been settled or rolled back";
+  if (unsettled.Status === "settled") return "a move's source drop has not finished";
+  return "a move of it is already in progress";
+};
 
 /**
  * Five seconds while something is moving.

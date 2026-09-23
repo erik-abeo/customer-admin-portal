@@ -38,6 +38,7 @@ FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 
 # Drop the stock site config and ship our own.
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/security-headers.conf /etc/nginx/snippets/security-headers.conf
 
 # The image's USER nginx (uid 101) cannot bind <1024; we listen on 8080.
 COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html

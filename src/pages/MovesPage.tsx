@@ -30,6 +30,10 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { useDatabases } from "@/features/databases/queries";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
+import {
+  serverStatuses,
+  whyServerNotTakingCustomers,
+} from "@/features/databaseServers/status";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import {
   canCancelMove,
@@ -103,15 +107,27 @@ export function MovesPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const detail = useCustomerMove(detailId ?? undefined);
+  // Server status lives on the capacity reading, so it is fetched only while
+  // the form is open.
+  const statuses = serverStatuses(servers.data);
 
   const selectedDatabase = (databases.data ?? []).find(
     (d) => String(d.Id) === databaseId,
   );
 
-  // A customer cannot move to the server they are already on, so it is not offered.
+  // A customer cannot move to the server they are already on, so it is not
+  // offered. A server that is not taking new customers is offered but disabled,
+  // with the reason, as the service refuses it too.
   const targetOptions = (servers.data ?? [])
     .filter((s) => !selectedDatabase || s.Id !== selectedDatabase.DatabaseServerId)
-    .map((s) => ({ value: String(s.Id), label: s.Name }));
+    .map((s) => {
+      const unavailable = whyServerNotTakingCustomers(statuses.get(s.Id));
+      return {
+        value: String(s.Id),
+        label: unavailable ? `${s.Name}, unavailable: ${unavailable}` : s.Name,
+        disabled: unavailable !== null,
+      };
+    });
 
   const resetForm = () => {
     setDatabaseId("");
@@ -329,7 +345,7 @@ export function MovesPage() {
                 size="compact-sm"
                 variant="subtle"
                 color="red"
-                aria-label={`Drop the source of the move for customer ${move.CrystalPmId}`}
+                aria-label={`${move.Status === "settled" ? "Finish dropping source" : "Drop source"} of the move for customer ${move.CrystalPmId}`}
                 onClick={() => confirmDropSource(move)}
               >
                 {move.Status === "settled" ? "Finish dropping source" : "Drop source"}

@@ -76,7 +76,32 @@ export const seedServers: DatabaseServerInfoItem[] = [
     Certificate: null,
     SecurityGroupId: "sg-0demo30000demo3",
   },
+  {
+    Id: 4,
+    Name: "us-east-legacy-01",
+    Description: "Being retired; takes no new customers",
+    LocalServerAddress: "10.0.0.5",
+    RemoteServerAddress: null,
+    ServerPort: 3306,
+    AdminUserName: "cpmadmin",
+    RootUserPassword: "demo-root-pw-4",
+    Certificate: null,
+    SecurityGroupId: null,
+  },
 ];
+
+/**
+ * Each server's recorded `status`. The server list does not carry it; the
+ * service reports it on the capacity reading. Only `available` takes new
+ * customers, so us-east-legacy-01 shows the refusal. A server created during
+ * the demo is `available`, as the column defaults.
+ */
+export const seedServerStatuses: Record<number, string> = {
+  1: "available",
+  2: "available",
+  3: "available",
+  4: "retiring",
+};
 
 export const seedDatabases: DatabaseInfoItem[] = [
   {
@@ -127,6 +152,25 @@ export const seedDatabases: DatabaseInfoItem[] = [
     CrystalPmId: 66666,
     Status: "suspended",
   },
+  {
+    // The existing database migration 502 is streaming into.
+    Id: 201,
+    DatabaseServerId: 2,
+    DatabaseName: "easyopti_0887",
+    Description: null,
+    CrystalPmId: 887,
+    Status: "active",
+  },
+  {
+    // Provisioned by migration 503, which failed. Left registered, as the
+    // service leaves it, so its target can be discarded.
+    Id: 202,
+    DatabaseServerId: 1,
+    DatabaseName: "easyopti_0319",
+    Description: null,
+    CrystalPmId: 319,
+    Status: "active",
+  },
 ];
 
 export const seedAuthorizedUsers: AuthorizedUserInfoItem[] = [
@@ -135,6 +179,7 @@ export const seedAuthorizedUsers: AuthorizedUserInfoItem[] = [
     Email: "alice.morris@acme-eyecare.com",
     UseStaticHost: true,
     StaticHost: "203.0.113.10",
+    MaxLoginInstances: 1,
     DatabaseMappings: [{ DatabaseServerId: 1, DatabaseId: 100 }],
   },
   {
@@ -142,6 +187,7 @@ export const seedAuthorizedUsers: AuthorizedUserInfoItem[] = [
     Email: "bob.chen@globex-optical.com",
     UseStaticHost: false,
     StaticHost: null,
+    MaxLoginInstances: 1,
     DatabaseMappings: [{ DatabaseServerId: 1, DatabaseId: 101 }],
   },
   {
@@ -149,6 +195,7 @@ export const seedAuthorizedUsers: AuthorizedUserInfoItem[] = [
     Email: "carol.diaz@initech-vision.com",
     UseStaticHost: true,
     StaticHost: "203.0.113.42",
+    MaxLoginInstances: 3,
     DatabaseMappings: [
       { DatabaseServerId: 1, DatabaseId: 102 },
       { DatabaseServerId: 2, DatabaseId: 103 },
@@ -159,6 +206,7 @@ export const seedAuthorizedUsers: AuthorizedUserInfoItem[] = [
     Email: "dan.evans@wayne-optical.com",
     UseStaticHost: false,
     StaticHost: null,
+    MaxLoginInstances: 1,
     DatabaseMappings: [{ DatabaseServerId: 3, DatabaseId: 104 }],
   },
   {
@@ -166,6 +214,7 @@ export const seedAuthorizedUsers: AuthorizedUserInfoItem[] = [
     Email: "eve.fischer@stark-vision.com",
     UseStaticHost: true,
     StaticHost: "198.51.100.7",
+    MaxLoginInstances: 1,
     DatabaseMappings: [{ DatabaseServerId: 3, DatabaseId: 105 }],
   },
 ];
@@ -249,10 +298,10 @@ export const seedStaticUserPrivileges: Record<
   number,
   Array<{ DatabaseId: number; Privileges: DatabasePrivileges }>
 > = {
-  1: [
-    { DatabaseId: 100, Privileges: readOnlyPrivs },
-    { DatabaseId: 101, Privileges: readOnlyPrivs },
-  ],
+  // tenant_globex (101) is deliberately left without static-user privileges: the
+  // service refuses to move a database a static user can reach, so it is the
+  // demo's movable customer.
+  1: [{ DatabaseId: 100, Privileges: readOnlyPrivs }],
   2: [{ DatabaseId: 102, Privileges: readWritePrivs }],
   3: [{ DatabaseId: 103, Privileges: readWritePrivs }],
   4: [

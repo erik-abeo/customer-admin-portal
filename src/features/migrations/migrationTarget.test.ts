@@ -22,6 +22,7 @@ import {
   toCreateRequest,
   visibleDatabases,
   whyDatabaseNotSelectable,
+  whyServerNotSelectable,
   type MigrationTargetSelection,
 } from "./migrationTarget";
 
@@ -212,5 +213,18 @@ describe("whyDatabaseNotSelectable", () => {
     expect(whyDatabaseNotSelectable({ ...mine, Status: "suspended" }, "")).toBe(
       "suspended",
     );
+  });
+});
+
+describe("whyServerNotSelectable", () => {
+  it("refuses a server that is not available when the key provisions a database", () => {
+    expect(whyServerNotSelectable("provision", "retiring")).toBe(
+      "marked 'retiring', not taking new customers",
+    );
+    expect(whyServerNotSelectable("provision", "available")).toBeNull();
+  });
+
+  it("allows any server for a key against an existing database, as the service does", () => {
+    expect(whyServerNotSelectable("existing", "retiring")).toBeNull();
   });
 });

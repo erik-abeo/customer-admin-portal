@@ -1,4 +1,5 @@
 import {
+  Loader,
   ActionIcon,
   Button,
   Card,
@@ -33,6 +34,7 @@ import { features } from "@/config/env";
 import { DatabaseServerForm } from "@/features/databaseServers/DatabaseServerForm";
 import {
   useCreateDatabaseServer,
+  useDatabaseServer,
   useDatabaseServers,
   useDeleteDatabaseServer,
   useUpdateDatabaseServer,
@@ -113,6 +115,8 @@ export function DatabaseServersPage() {
 
   const [createOpened, createCtl] = useDisclosure(false);
   const [editTarget, setEditTarget] = useState<DatabaseServerInfoItem | null>(null);
+  // The list carries no secrets, so the form is given the server read by id.
+  const editServer = useDatabaseServer(editTarget?.Id);
 
   return (
     <Container size="xl" py="lg" className="app-fade-in">
@@ -333,9 +337,12 @@ export function DatabaseServersPage() {
         title={editTarget ? `Edit ${editTarget.Name}` : "Edit"}
         size="lg"
       >
-        {editTarget && (
+        {editTarget && (!editServer.data || editServer.isPlaceholderData) && (
+          <Loader size="sm" aria-label="Loading server" />
+        )}
+        {editTarget && editServer.data && !editServer.isPlaceholderData && (
           <DatabaseServerForm
-            initial={editTarget}
+            initial={editServer.data}
             submitLabel="Save changes"
             onCancel={() => setEditTarget(null)}
             submitting={update.isPending}

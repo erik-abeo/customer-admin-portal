@@ -101,10 +101,13 @@ export function CapacityPage() {
         </Table.Td>
         <Table.Td>{database.AuthorizedUserCount}</Table.Td>
         <Table.Td>{formatBytes(database.DataBytes + database.IndexBytes)}</Table.Td>
+        {/* A customer row has no connection count of its own, so this column
+            carries its sign-ins instead, said in the cell rather than only in a
+            tooltip. */}
         <Table.Td>
-          <Tooltip label="Authorizations in the last 30 days" withArrow>
-            <Text size="sm">{database.AuthorizationsLast30Days.toLocaleString()}</Text>
-          </Tooltip>
+          <Text size="sm">
+            {database.AuthorizationsLast30Days.toLocaleString()} sign-ins in 30 days
+          </Text>
         </Table.Td>
         <Table.Td />
       </Table.Tr>
@@ -156,7 +159,7 @@ export function CapacityPage() {
               size="compact-sm"
               variant="subtle"
               aria-expanded={isExpanded}
-              aria-label={`${isExpanded ? "Hide" : "Show"} customers on ${server.Name ?? "this server"}`}
+              aria-label={`${isExpanded ? "Hide customers" : "Customers"} on ${server.Name ?? "this server"}`}
               onClick={() => setExpanded(isExpanded ? null : server.DatabaseServerId)}
             >
               {isExpanded ? "Hide" : "Customers"}

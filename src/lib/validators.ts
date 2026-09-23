@@ -158,3 +158,20 @@ export function strongPassword(
     return null;
   };
 }
+
+/**
+ * Refuses clearing a field the service cannot clear.
+ *
+ * The update endpoints skip any string that is empty or whitespace, so a field
+ * that had a value and is emptied on edit would be reported as saved while the
+ * old value stays. Better to say so in the form.
+ */
+export function notClearable(
+  field: string,
+  stored: string | null | undefined,
+): Validator<string | null | undefined> {
+  return (value) =>
+    (stored ?? "").trim().length > 0 && (value ?? "").trim().length === 0
+      ? `${field} cannot be cleared once set. Enter a replacement, or leave it as it was.`
+      : null;
+}

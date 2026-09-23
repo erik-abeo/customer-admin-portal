@@ -65,7 +65,9 @@ describe("freeCapacityFraction", () => {
   it("is null when the server has no stated cap", () => {
     // Not 1. An unbounded server is not "100% free", and treating it as such
     // would let it win a comparison it was never entered into.
-    expect(freeCapacityFraction(server(1, "a", "Headroom", { MaxCustomerDatabases: null }))).toBeNull();
+    expect(
+      freeCapacityFraction(server(1, "a", "Headroom", { MaxCustomerDatabases: null })),
+    ).toBeNull();
   });
 
   it("never goes negative when a server is over its cap", () => {
@@ -102,8 +104,14 @@ describe("compareForPlacement", () => {
 
   it("prefers more free capacity within the same verdict", () => {
     const ranked = [
-      server(1, "busier", "Headroom", { MaxCustomerDatabases: 10, CustomerDatabaseCount: 7 }),
-      server(2, "emptier", "Headroom", { MaxCustomerDatabases: 10, CustomerDatabaseCount: 1 }),
+      server(1, "busier", "Headroom", {
+        MaxCustomerDatabases: 10,
+        CustomerDatabaseCount: 7,
+      }),
+      server(2, "emptier", "Headroom", {
+        MaxCustomerDatabases: 10,
+        CustomerDatabaseCount: 1,
+      }),
     ].sort(compareForPlacement);
 
     expect(ranked.map((s) => s.Name)).toEqual(["emptier", "busier"]);
@@ -113,17 +121,19 @@ describe("compareForPlacement", () => {
     // The one somebody has thought about the limits of, over the one nobody has.
     const ranked = [
       server(1, "uncapped", "Headroom", { MaxCustomerDatabases: null }),
-      server(2, "capped", "Headroom", { MaxCustomerDatabases: 10, CustomerDatabaseCount: 5 }),
+      server(2, "capped", "Headroom", {
+        MaxCustomerDatabases: 10,
+        CustomerDatabaseCount: 5,
+      }),
     ].sort(compareForPlacement);
 
     expect(ranked.map((s) => s.Name)).toEqual(["capped", "uncapped"]);
   });
 
   it("is stable by name when everything else ties", () => {
-    const ranked = [
-      server(1, "beta", "Headroom"),
-      server(2, "alpha", "Headroom"),
-    ].sort(compareForPlacement);
+    const ranked = [server(1, "beta", "Headroom"), server(2, "alpha", "Headroom")].sort(
+      compareForPlacement,
+    );
 
     expect(ranked.map((s) => s.Name)).toEqual(["alpha", "beta"]);
   });
@@ -133,7 +143,9 @@ describe("recommendPlacement", () => {
   it("recommends the best server with headroom, and says why", () => {
     const result = recommendPlacement([
       server(1, "busy", "NearCapacity"),
-      server(2, "roomy", "Headroom", { VerdictReasons: ["2 of 10 customer databases used."] }),
+      server(2, "roomy", "Headroom", {
+        VerdictReasons: ["2 of 10 customer databases used."],
+      }),
     ]);
 
     expect(result.recommended?.Name).toBe("roomy");

@@ -13,6 +13,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -23,8 +24,34 @@ import { fileURLToPath } from "node:url";
 
 export const MYSQL_CONTAINER = "cpm-api-mysql84-test";
 export const MARIADB_CONTAINER = "cpm-api-mariadb106-test";
-export const MYSQL_PORT = 3384;
-export const MARIADB_PORT = 3316;
+
+/**
+ * The host port a container's 3306 is published on, read from Docker rather
+ * than assumed: the test containers' ports can be remapped, and a hardcoded port
+ * could then reach a developer's own server instead.
+ */
+function hostPort(container: string): number {
+  let mapping: string;
+  try {
+    mapping = execFileSync("docker", ["port", container, "3306/tcp"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    throw new Error(
+      `The test container ${container} is not running. Start the API's test containers first (see README).`,
+    );
+  }
+  const port = Number(mapping.split(/\r?\n/)[0]?.split(":").pop());
+  if (!Number.isInteger(port) || port <= 0)
+    throw new Error(
+      `Could not read the published port of ${container} from: ${mapping}`,
+    );
+  return port;
+}
+
+export const MYSQL_PORT = hostPort(MYSQL_CONTAINER);
+export const MARIADB_PORT = hostPort(MARIADB_CONTAINER);
 export const DB_PASSWORD =
   process.env.CPM_API_TEST_MARIADB_PASSWORD ?? "CpmApiTest2026";
 
@@ -130,15 +157,67 @@ export function readCertificate(container: string): string {
   return run("docker", ["exec", container, "cat", file]).replace(/\r\n/g, "\n");
 }
 
+/** Who holds the lock: this run's process, and the API it started once it has. */
+interface LockOwner {
+  ownerPid: number;
+  apiPid?: number;
+}
+
+const OWNER_FILE = path.join(LOCK, "owner.json");
+
+function isAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means it exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function readOwner(): LockOwner | null {
+  try {
+    return JSON.parse(readFileSync(OWNER_FILE, "utf-8")) as LockOwner;
+  } catch {
+    return null;
+  }
+}
+
+function writeOwner(owner: LockOwner): void {
+  writeFileSync(OWNER_FILE, JSON.stringify(owner));
+}
+
+/**
+ * Takes the lock, reclaiming one left by a run that died. A lock whose owner is
+ * gone is taken over, and the API that run started, if it is still running, is
+ * stopped first: otherwise its move executor would carry on against the
+ * authorization database this run is about to rebuild.
+ */
 async function acquireLock(): Promise<void> {
   const deadline = Date.now() + 30 * 60_000;
   for (;;) {
     try {
       mkdirSync(LOCK);
+      writeOwner({ ownerPid: process.pid });
       return;
     } catch {
+      const owner = readOwner();
+      if (owner && !isAlive(owner.ownerPid)) {
+        if (owner.apiPid && isAlive(owner.apiPid)) {
+          try {
+            process.kill(owner.apiPid);
+          } catch {
+            // Already gone.
+          }
+        }
+        rmSync(LOCK, { recursive: true, force: true });
+        continue;
+      }
       if (Date.now() > deadline)
-        throw new Error(`Timed out waiting for the database lock at ${LOCK}.`);
+        throw new Error(
+          `Timed out waiting for the database lock at ${LOCK}, held by process ${owner?.ownerPid ?? "unknown"}.`,
+        );
       await new Promise((resolve) => setTimeout(resolve, 20_000));
     }
   }
@@ -146,6 +225,55 @@ async function acquireLock(): Promise<void> {
 
 function releaseLock(): void {
   rmSync(LOCK, { recursive: true, force: true });
+}
+
+/**
+ * Refuses to go on unless the TCP endpoint the API will be given is this
+ * suite's test container and carries the test sentinel schema, the same guard
+ * the API's own integration tests apply. The check connects over that endpoint
+ * from inside the container, through host.docker.internal, and compares the
+ * server's hostname with the container's, so a different server answering on
+ * the port is caught.
+ */
+function assertTestServer(container: string, port: number): void {
+  const client = container === MARIADB_CONTAINER ? "mariadb" : "mysql";
+  const expectedHost = run("docker", [
+    "inspect",
+    "-f",
+    "{{.Config.Hostname}}",
+    container,
+  ]).trim();
+  const args = [
+    "exec",
+    container,
+    client,
+    "-h",
+    "host.docker.internal",
+    "-P",
+    String(port),
+    "-uroot",
+    `-p${DB_PASSWORD}`,
+    "-N",
+    "-B",
+  ];
+  if (client === "mariadb") args.push("--ssl");
+  args.push(
+    "-e",
+    "SELECT @@hostname, (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE schema_name = 'cpm_api_test_sentinel')",
+  );
+  let answer: string;
+  try {
+    answer = run("docker", args).trim();
+  } catch (error) {
+    throw new Error(
+      `Could not reach 127.0.0.1:${port} as the test server ${container}; refusing to run. ${(error as Error).message}`,
+    );
+  }
+  const [hostname, sentinel] = answer.split(/\s+/);
+  if (hostname !== expectedHost || sentinel !== "1")
+    throw new Error(
+      `127.0.0.1:${port} is not the test container ${container} with the cpm_api_test_sentinel schema (answered as '${hostname}', sentinel ${sentinel ?? "missing"}). Refusing to run against it.`,
+    );
 }
 
 function applyScript(file: string): void {
@@ -207,7 +335,8 @@ function buildAuthDatabase(): void {
 async function startApi(
   port: number,
   apiKey: string,
-): Promise<{ process: ChildProcess; directory: string }> {
+  directory: string,
+): Promise<ChildProcess> {
   run("dotnet", [
     "build",
     path.join(API_PROJECT, "ClientRemoteDatabaseAccessAPI.csproj"),
@@ -220,13 +349,16 @@ async function startApi(
 
   // Run from a copy, so rebuilding the API while this suite runs is not blocked by
   // this process holding its output open.
-  const directory = path.join(
-    tmpdir(),
-    `cpm-portal-live-api-${randomBytes(4).toString("hex")}`,
-  );
   cpSync(path.join(API_PROJECT, "bin", "Debug", "net8.0"), directory, {
     recursive: true,
   });
+  // The build output carries the committed appsettings.json, which holds
+  // production values. Every setting is supplied below, so the copy keeps none
+  // of them on disk.
+  for (const file of readdirSync(directory).filter((f) =>
+    /^appsettings(\..*)?\.json$/i.test(f),
+  ))
+    rmSync(path.join(directory, file), { force: true });
 
   const authConnection = `Server=127.0.0.1;Port=${MARIADB_PORT};User ID=root;Password=${DB_PASSWORD};Database=${AUTH_DATABASE};SslMode=Required`;
   const fieldKey = randomBytes(16).toString("hex");
@@ -297,7 +429,7 @@ async function startApi(
     if (child.exitCode === null) child.kill();
   });
   child.on("exit", () => writeFileSync(log, output.join("")));
-  return { process: child, directory };
+  return child;
 }
 
 /**
@@ -306,16 +438,27 @@ async function startApi(
  */
 export async function startStack(port: number): Promise<() => Promise<void>> {
   await acquireLock();
-  let api: { process: ChildProcess; directory: string } | undefined;
+  const directory = path.join(
+    tmpdir(),
+    `cpm-portal-live-api-${randomBytes(4).toString("hex")}`,
+  );
+  const removeCopy = () => {
+    if (existsSync(directory)) rmSync(directory, { recursive: true, force: true });
+  };
+  let api: ChildProcess | undefined;
   try {
+    assertTestServer(MYSQL_CONTAINER, MYSQL_PORT);
+    assertTestServer(MARIADB_CONTAINER, MARIADB_PORT);
     sweep();
     buildAuthDatabase();
 
     const apiKey = randomBytes(16).toString("hex");
-    api = await startApi(port, apiKey);
+    api = await startApi(port, apiKey, directory);
+    writeOwner({ ownerPid: process.pid, apiPid: api.pid });
     process.env.CPM_LIVE_API_KEY = apiKey;
   } catch (error) {
-    api?.process.kill();
+    api?.kill();
+    removeCopy();
     releaseLock();
     throw error;
   }
@@ -323,14 +466,13 @@ export async function startStack(port: number): Promise<() => Promise<void>> {
   const started = api;
   return async () => {
     try {
-      if (started.process.exitCode === null) {
-        started.process.kill();
+      if (started.exitCode === null) {
+        started.kill();
         await new Promise((resolve) => setTimeout(resolve, 2_000));
       }
       if (process.env.CPM_LIVE_KEEP === "1") return;
       sweep();
-      if (existsSync(started.directory))
-        rmSync(started.directory, { recursive: true, force: true });
+      removeCopy();
     } finally {
       releaseLock();
     }

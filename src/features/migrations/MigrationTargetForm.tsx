@@ -34,12 +34,15 @@ import {
   type MigrationTargetSelection,
   type TargetMode,
   whyDatabaseNotSelectable,
+  whyServerNotSelectable,
 } from "@/features/migrations/migrationTarget";
 import { composeValidators, maxLength, required } from "@/lib/validators";
 
 interface MigrationTargetFormProps {
   servers: DatabaseServerInfoItem[];
   databases: DatabaseInfoItem[];
+  /** Recorded status per server id. A server missing from it is not refused. */
+  serverStatuses?: Map<number, string | null>;
   submitting?: boolean;
   onCancel: () => void;
   /** Receives the request plus the plain-language destination for the confirm step. */
@@ -59,10 +62,14 @@ interface MigrationTargetFormProps {
 export function MigrationTargetForm({
   servers,
   databases,
+  serverStatuses,
   submitting,
   onCancel,
   onSubmit,
 }: MigrationTargetFormProps) {
+  const serverRefusal = (mode: TargetMode, serverId: string) =>
+    whyServerNotSelectable(mode, serverStatuses?.get(Number(serverId)));
+
   const form = useForm<MigrationTargetSelection>({
     initialValues: {
       Mode: "provision",
@@ -74,7 +81,16 @@ export function MigrationTargetForm({
     },
     validateInputOnBlur: true,
     validate: {
-      DatabaseServerId: required("Database server"),
+      DatabaseServerId: (value, values) => {
+        const missing = required("Database server")(value);
+        if (missing) return missing;
+        // Also said in the option list, but the mode can be switched to
+        // provision after a server was picked.
+        const reason = serverRefusal(values.Mode, value);
+        return reason
+          ? `That server cannot take a new database: ${reason}. Use an existing database on it, or pick another server.`
+          : null;
+      },
       DatabaseId: (value, values) => {
         if (values.Mode !== "existing") return null;
         if (!value) return "Select the target database";
@@ -163,7 +179,14 @@ export function MigrationTargetForm({
             required
             searchable
             leftSection={<IconServer2 size={14} />}
-            data={servers.map((s) => ({ value: String(s.Id), label: s.Name }))}
+            data={servers.map((s) => {
+              const unavailable = serverRefusal(form.values.Mode, String(s.Id));
+              return {
+                value: String(s.Id),
+                label: unavailable ? `${s.Name}, unavailable: ${unavailable}` : s.Name,
+                disabled: unavailable !== null,
+              };
+            })}
             value={form.values.DatabaseServerId}
             error={form.errors.DatabaseServerId}
             onChange={(value) => {

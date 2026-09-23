@@ -99,7 +99,8 @@ export function CommandPalette() {
             {
               id: "nav-capacity",
               label: "Capacity",
-              description: "How full each server is, and where the next customer should go",
+              description:
+                "How full each server is, and where the next customer should go",
               keywords: ["placement", "capacity", "servers", "headroom", "size"],
               leftSection: <IconChartBar size={18} stroke={1.7} />,
               onClick: () => navigate("/capacity"),

@@ -46,6 +46,7 @@ import type {
   ProbeDatabaseServerRequest,
   ProbeDatabaseServerResponse,
   CreateStaticDatabaseUserRequest,
+  CreateStaticDatabaseUserResponse,
   CreateUserRequest,
   DatabaseInfoItem,
   DatabasePrivilegeInfo,
@@ -56,8 +57,11 @@ import type {
   UpdateDatabaseInfoRequest,
   UpdateDatabaseServerInfoRequest,
   UpdateStaticDatabaseUserRequest,
+  UpdateStaticDatabaseUserResponse,
   UpdateUserRequest,
 } from "@/api/types";
+
+import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 
 import { demoStore } from "./demoStore";
 import { advanceMoves, advanceSessions, restoreSource } from "./simulation";
@@ -136,6 +140,14 @@ const UNSETTLED_MOVES = new Set([
  * unregistered, are left to the service.
  */
 function mintRefusal(req: CreateMigrationSessionRequest): string | null {
+  // As the service checks it: a stale server id is a refusal, and only an
+  // available server takes a new customer. A key against a database already
+  // there is a retry for a customer who is on it, so it is allowed.
+  if (!demoStore.servers.some((s) => s.Id === req.DatabaseServerId))
+    return `Database server ${req.DatabaseServerId} does not exist.`;
+  const serverStatus = demoStore.serverStatus(req.DatabaseServerId);
+  if (req.DatabaseName?.trim() && serverStatus !== "available")
+    return `That server is marked '${serverStatus}', so it is not taking new customers.`;
   if (req.DatabaseName !== null) {
     const name = req.DatabaseName.trim();
     const existingForCustomer = demoStore.databases.find(
@@ -201,7 +213,10 @@ const ROUTES: Route[] = [
       ok({
         Success: true,
         Message: null,
-        DatabaseServerInfoList: demoStore.servers,
+        DatabaseServerInfoList: demoStore.servers.map((s) => ({
+          ...s,
+          Status: demoStore.serverStatus(s.Id),
+        })),
       }),
   },
   {
@@ -212,7 +227,7 @@ const ROUTES: Route[] = [
       const id = Number(params.id);
       const found = demoStore.servers.find((s) => s.Id === id);
       if (!found) return notFound(`Database server ${id} not found`);
-      return ok(found);
+      return ok({ ...found, Status: demoStore.serverStatus(id) });
     },
   },
   {
@@ -265,6 +280,25 @@ const ROUTES: Route[] = [
             MoveId: 0,
           },
         };
+      if (!demoStore.servers.some((s) => s.Id === req.TargetDatabaseServerId))
+        return {
+          status: 400,
+          data: {
+            Success: false,
+            Message: `Database server ${req.TargetDatabaseServerId} does not exist.`,
+            MoveId: 0,
+          },
+        };
+      const targetStatus = demoStore.serverStatus(req.TargetDatabaseServerId);
+      if (targetStatus !== "available")
+        return {
+          status: 400,
+          data: {
+            Success: false,
+            Message: `The target server is marked '${targetStatus}', so it is not taking new customers.`,
+            MoveId: 0,
+          },
+        };
       if (database.Status !== "active")
         return {
           status: 400,
@@ -274,21 +308,57 @@ const ROUTES: Route[] = [
             MoveId: 0,
           },
         };
+      const refuse = (message: string) => ({
+        status: 400,
+        data: { Success: false, Message: message, MoveId: 0 },
+      });
+      const staticPrivileges = Object.values(demoStore.staticUserPrivileges)
+        .flat()
+        .filter((p) => p.DatabaseId === database.Id).length;
+      if (staticPrivileges > 0)
+        return refuse(
+          `${staticPrivileges} static user privilege(s) are held on this database, and moves do not carry static users yet. After a move they would still point at the old copy.`,
+        );
+      if (
+        demoStore.migrationSessions.some(
+          (s) =>
+            s.DatabaseId === database.Id &&
+            (s.Status === "redeemed" || s.Status === "streaming"),
+        )
+      )
+        return refuse(
+          "A migration is streaming into this database. Wait for it to finish, or revoke it, before moving the customer.",
+        );
       if (
         demoStore.customerMoves.some(
-          (m) => m.DatabaseId === database.Id && UNSETTLED_MOVES.has(m.Status ?? ""),
+          (m) =>
+            m.DatabaseId === database.Id &&
+            (UNSETTLED_MOVES.has(m.Status ?? "") ||
+              (m.Status === "settled" && !m.SourceDroppedDateTimeUtc)),
         )
-      ) {
-        return {
-          status: 400,
-          data: {
-            Success: false,
-            Message:
-              "This customer already has a move in progress, or one that has cut over and not been settled. Settle or roll that back first.",
-            MoveId: 0,
-          },
-        };
-      }
+      )
+        return refuse(
+          "This customer already has a move in progress, or one that has cut over and not been settled. Settle or roll that back first.",
+        );
+      const targetName = req.TargetDatabaseName?.trim() || database.DatabaseName;
+      if (!isSafeDatabaseName(targetName))
+        return refuse(
+          `'${targetName}' is not a usable database name. Use letters, digits and underscores, starting with a letter.`,
+        );
+      const onTarget = demoStore.databases.filter(
+        (d) => d.DatabaseServerId === req.TargetDatabaseServerId,
+      );
+      const sameName = onTarget.find(
+        (d) => d.DatabaseName.toLowerCase() === targetName.toLowerCase(),
+      );
+      if (sameName)
+        return refuse(
+          `The target server already has a database named '${sameName.DatabaseName}' (customer ${sameName.CrystalPmId}). Choose another name for this customer's copy.`,
+        );
+      if (onTarget.some((d) => d.CrystalPmId === database.CrystalPmId))
+        return refuse(
+          `Customer ${database.CrystalPmId} already has a database registered on the target server. Resolve that registration before moving them there.`,
+        );
 
       const source = demoStore.servers.find((s) => s.Id === database.DatabaseServerId);
       const target = demoStore.servers.find((s) => s.Id === req.TargetDatabaseServerId);
@@ -302,7 +372,7 @@ const ROUTES: Route[] = [
         SourceDatabaseServerName: source?.Name ?? null,
         TargetDatabaseServerId: req.TargetDatabaseServerId,
         TargetDatabaseServerName: target?.Name ?? null,
-        TargetDatabaseName: req.TargetDatabaseName ?? database.DatabaseName,
+        TargetDatabaseName: targetName,
         SourceDatabaseName: database.DatabaseName,
         Status: "planned",
         PhaseDetail: "Waiting for the executor to reserve the target.",
@@ -387,13 +457,28 @@ const ROUTES: Route[] = [
     handle: ({ params }) => {
       const move = demoStore.customerMoves.find((m) => m.Id === Number(params.id));
       if (!move) return notFound("Move not found");
-      if (move.Status !== "flipped") {
+      if (move.SourceDroppedDateTimeUtc)
+        return ok({
+          Success: true,
+          Message: "The source has already been dropped.",
+          MoveId: move.Id,
+        });
+      // As the service: a settled move with no drop recorded is a drop interrupted
+      // after its claim, and asking again finishes it.
+      if (move.Status !== "flipped" && move.Status !== "settled") {
         return ok({
           Success: false,
           Message: `This move is ${move.Status}. Only a move that cut over cleanly has a source to retire.`,
           MoveId: move.Id,
         });
       }
+      if (!move.SourceDatabaseName?.trim())
+        return ok({
+          Success: false,
+          Message:
+            "The source database name is not recorded, so it cannot be dropped safely.",
+          MoveId: move.Id,
+        });
       move.Status = "settled";
       move.SourceDroppedDateTimeUtc = new Date().toISOString();
       move.PhaseDetail = "Source dropped. This move can no longer be rolled back.";
@@ -436,7 +521,7 @@ const ROUTES: Route[] = [
           Name: server.Name,
           Engine: index === 1 ? "MariaDb" : "MySql",
           EngineVersion: index === 1 ? "10.11.6" : "8.4.3",
-          Status: "available",
+          Status: demoStore.serverStatus(server.Id),
           CustomerDatabaseCount: used,
           MaxCustomerDatabases: max,
           AuthorizedUserCount: databases.reduce((n, d) => n + d.AuthorizedUserCount, 0),
@@ -616,6 +701,23 @@ const ROUTES: Route[] = [
             "Nothing to discard: this migration's database has already been dropped.",
         });
       }
+      // As the service checks it: the registration is read as it is now, and
+      // if it has been repointed (another schema, or the same name on another
+      // server) it no longer names what this session created.
+      const registration = demoStore.databases.find((d) => d.Id === session.DatabaseId);
+      if (
+        !registration ||
+        registration.DatabaseServerId !== session.DatabaseServerId ||
+        registration.DatabaseName.toLowerCase() !==
+          (session.ProvisionDatabaseName ?? "").toLowerCase()
+      )
+        return {
+          status: 409,
+          data: {
+            Success: false,
+            Message: `The registration of database ${session.DatabaseId} has changed since this session created '${session.ProvisionDatabaseName}' on server ${session.DatabaseServerId}, so it is no longer this migration's to drop.`,
+          },
+        };
       const dropped = session.DatabaseName ?? session.ProvisionDatabaseName;
       demoStore.databases = demoStore.databases.filter(
         (d) => d.Id !== session.DatabaseId,
@@ -661,11 +763,16 @@ const ROUTES: Route[] = [
       // the request. A host mentioning "maria" comes back as MariaDB purely so
       // the two-engine rendering can be exercised without one.
       const isMariaDb = /maria/i.test(req.Host ?? "");
+      // Likewise a host mentioning "noprocess" answers as a login without
+      // PROCESS, so the rejection can be seen without a real server.
+      const canSeeConnections = !/noprocess/i.test(req.Host ?? "");
       const engine = isMariaDb ? "MariaDb" : "MySql";
       const version = isMariaDb ? "10.11.6" : "8.4.3";
       return ok<ProbeDatabaseServerResponse>({
         Success: true,
-        Message: `${engine} ${version} is supported and this login can provision.`,
+        Message: canSeeConnections
+          ? `${engine} ${version} is supported and this login can provision.`
+          : "This server cannot be registered: the login cannot see other logins' connections (PROCESS).",
         Engine: engine,
         EngineVersion: version,
         RawVersion: isMariaDb ? `5.5.5-${version}-MariaDB-log` : version,
@@ -674,7 +781,8 @@ const ROUTES: Route[] = [
         CanCreateDatabase: true,
         CanCreateUser: true,
         CanGrant: true,
-        IsSupported: true,
+        CanSeeConnections: canSeeConnections,
+        IsSupported: canSeeConnections,
         Checks: [
           {
             Name: "connect",
@@ -711,6 +819,13 @@ const ROUTES: Route[] = [
             Passed: true,
             Detail: "Login holds GRANT OPTION.",
           },
+          {
+            Name: "privileges.process",
+            Passed: canSeeConnections,
+            Detail: canSeeConnections
+              ? "Login can see other logins' connections."
+              : "Login lacks PROCESS, so it cannot see or end other logins' connections: revoking a migration, ending a session and draining a move would all silently do nothing.",
+          },
         ],
       });
     },
@@ -720,17 +835,21 @@ const ROUTES: Route[] = [
     pattern: /^\/create-database-server-info$/,
     handle: ({ body }) => {
       const req = body as CreateDatabaseServerInfoRequest;
+      // Blank optional fields are stored as NULL, as the service stores them,
+      // and a missing admin login defaults to root.
+      const blankToNull = (value: string | null | undefined) =>
+        value?.trim() ? value : null;
       const next: DatabaseServerInfoItem = {
         Id: demoStore.serverIds.next(),
         Name: req.Name,
-        Description: req.Description,
+        Description: blankToNull(req.Description),
         LocalServerAddress: req.LocalServerAddress,
-        RemoteServerAddress: req.RemoteServerAddress,
+        RemoteServerAddress: blankToNull(req.RemoteServerAddress)?.trim() ?? null,
         ServerPort: req.ServerPort,
-        AdminUserName: req.AdminUserName,
+        AdminUserName: req.AdminUserName?.trim() || "root",
         RootUserPassword: req.RootUserPassword,
         Certificate: req.Certificate,
-        SecurityGroupId: req.SecurityGroupId,
+        SecurityGroupId: blankToNull(req.SecurityGroupId),
       };
       demoStore.servers.push(next);
       demoStore.recordAdminEvent(`Created database server ${next.Name}`);
@@ -750,7 +869,7 @@ const ROUTES: Route[] = [
       // counts when positive. SecurityGroupId alone can be cleared: null leaves
       // it, and an empty string stores null.
       const stored = demoStore.servers[idx];
-      const given = (value: string | null | undefined) =>
+      const given = (value: string | null | undefined): value is string =>
         value !== null && value !== undefined && value.trim().length > 0;
       const next = { ...stored };
       if (given(req.Name)) next.Name = req.Name;
@@ -928,6 +1047,7 @@ const ROUTES: Route[] = [
         Email: req.Email,
         UseStaticHost: req.UseStaticHost,
         StaticHost: req.StaticHost,
+        MaxLoginInstances: req.MaxLoginInstances ?? 1,
         DatabaseMappings: req.DatabaseMappings ?? [],
       };
       demoStore.authorizedUsers.push(next);
@@ -935,7 +1055,8 @@ const ROUTES: Route[] = [
         `Created authorized user ${next.Email}`,
         `DatabaseMappings count: ${next.DatabaseMappings.length}`,
       );
-      return ok({ Success: true, Message: null, Id: next.Id });
+      // The service answers with a plain string, not a result object.
+      return ok("User created successfully");
     },
   },
   {
@@ -952,10 +1073,13 @@ const ROUTES: Route[] = [
         Email: req.Email,
         UseStaticHost: req.UseStaticHost,
         StaticHost: req.StaticHost,
+        // The service writes this on every update, defaulting a missing one to 1.
+        MaxLoginInstances: req.MaxLoginInstances ?? 1,
         DatabaseMappings: req.DatabaseMappings,
       };
       demoStore.recordAdminEvent(`Updated authorized user ${req.Email}`);
-      return ok({ Success: true, Message: null });
+      // The service answers with a plain string, not a result object.
+      return ok("User updated successfully");
     },
   },
   {
@@ -968,7 +1092,8 @@ const ROUTES: Route[] = [
       if (idx === -1) return notFound(`User ${params.id} not found`);
       const removed = demoStore.authorizedUsers.splice(idx, 1)[0];
       demoStore.recordAdminEvent(`Deleted authorized user ${removed.Email}`);
-      return ok({ Success: true, Message: null });
+      // The service answers with a plain string, not a result object.
+      return ok("User deleted successfully");
     },
   },
 
@@ -1025,7 +1150,9 @@ const ROUTES: Route[] = [
     handle: ({ body }) => {
       const req = body as CreateStaticDatabaseUserRequest;
       const userName = `static_demo_${Date.now().toString(36)}`;
-      const created: Array<{ ServerId: number; ServerName: string | null }> = [];
+      // The service generates the password and ignores any in the request.
+      const password = "demo-generated-password";
+      const results: CreateStaticDatabaseUserResponse["Servers"] = [];
       for (const serverEntry of req.Servers) {
         const id = demoStore.staticUserIds.next();
         demoStore.staticUsers.push({
@@ -1044,28 +1171,37 @@ const ROUTES: Route[] = [
           }),
         );
         const server = demoStore.servers.find((s) => s.Id === serverEntry.ServerId);
-        created.push({
+        results.push({
           ServerId: serverEntry.ServerId,
           ServerName: server?.Name ?? null,
+          LocalServerAddress: server?.LocalServerAddress ?? null,
+          RemoteServerAddress: server?.RemoteServerAddress ?? null,
+          ServerPort: server ? String(server.ServerPort) : null,
+          UserPassword: password,
+          Certificate: server?.Certificate ?? null,
+          Databases: serverEntry.Databases.map((d) => {
+            const db = demoStore.databases.find((x) => x.Id === d.DatabaseId);
+            return {
+              DatabaseId: d.DatabaseId,
+              DatabaseName: db?.DatabaseName ?? null,
+              Description: db?.Description ?? null,
+              Privileges: d.Privileges,
+              Errors: [],
+            };
+          }),
+          Errors: [],
         });
       }
       demoStore.recordAdminEvent(
         `Created static DB user ${userName}`,
-        `Servers: ${created.map((c) => c.ServerName ?? c.ServerId).join(", ")}`,
+        `Servers: ${results.map((c) => c.ServerName ?? c.ServerId).join(", ")}`,
       );
-      return ok({
+      const response: CreateStaticDatabaseUserResponse = {
         UserName: userName,
-        Message: null,
-        Servers: created.map((c) => ({
-          ServerId: c.ServerId,
-          ServerName: c.ServerName,
-          UserName: userName,
-          Password: "demo-generated-password",
-          HostAddress: null,
-          Port: null,
-          Message: null,
-        })),
-      });
+        Message: "Success",
+        Servers: results,
+      };
+      return ok(response);
     },
   },
   {
@@ -1077,17 +1213,51 @@ const ROUTES: Route[] = [
       // this user across servers.
       const all = demoStore.staticUsers.filter((u) => u.UserName === req.UserName);
       if (all.length === 0) return notFound(`Static user ${req.UserName} not found`);
-      for (const u of all) {
-        u.Description = req.NewDescription;
-        u.LastModifiedDateTimeUtc = new Date().toISOString();
+      const servers: UpdateStaticDatabaseUserResponse["Servers"] = [];
+      let failed = false;
+      for (const serverEntry of req.Servers) {
+        // As the service: a server the user is not on updates nothing, and says so.
+        const row = all.find((u) => u.DatabaseServerId === serverEntry.ServerId);
+        if (!row) {
+          failed = true;
+          servers.push({
+            ServerId: serverEntry.ServerId,
+            Databases: [],
+            Errors: [
+              `Failed to update static database user for server ID: ${serverEntry.ServerId}`,
+            ],
+          });
+          continue;
+        }
+        if (req.NewDescription) row.Description = req.NewDescription;
+        row.LastModifiedDateTimeUtc = new Date().toISOString();
+        demoStore.staticUserPrivileges[row.Id] = serverEntry.Databases.map(
+          (d): DatabasePrivilegeInfo => ({
+            DatabaseId: d.DatabaseId,
+            Privileges: d.Privileges,
+          }),
+        );
+        servers.push({
+          ServerId: serverEntry.ServerId,
+          Databases: serverEntry.Databases.map((d) => ({
+            DatabaseId: d.DatabaseId,
+            DatabaseName:
+              demoStore.databases.find((x) => x.Id === d.DatabaseId)?.DatabaseName ??
+              null,
+            Privileges: d.Privileges,
+            Errors: [],
+          })),
+          Errors: [],
+        });
       }
       demoStore.recordAdminEvent(`Updated static DB user ${req.UserName}`);
-      return ok({
+      const response: UpdateStaticDatabaseUserResponse = {
         UserName: req.UserName,
-        Message: null,
+        Message: failed ? "Failure" : "Success",
         NewPassword: req.GenerateNewPassword ? "demo-rotated-password" : null,
-        Servers: all.map((u) => ({ ServerId: u.DatabaseServerId, Message: null })),
-      });
+        Servers: servers,
+      };
+      return ok(response);
     },
   },
   {

@@ -36,6 +36,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { useDatabases } from "@/features/databases/queries";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
+import { serverStatuses } from "@/features/databaseServers/status";
 import { MigrationTargetForm } from "@/features/migrations/MigrationTargetForm";
 import {
   useCreateMigrationSession,
@@ -90,6 +91,9 @@ export function MigrationsPage() {
   const discardTarget = useDiscardMigrationTarget();
 
   const [formOpen, setFormOpen] = useState(false);
+  // Server status lives on the capacity reading, so it is fetched only while
+  // the form is open.
+  const statuses = serverStatuses(servers.data);
   const [pending, setPending] = useState<{
     request: CreateMigrationSessionRequest;
     description: string;
@@ -241,7 +245,7 @@ export function MigrationsPage() {
                 size="compact-sm"
                 variant="subtle"
                 color="red"
-                aria-label={`Discard the target of migration ${session.Id}`}
+                aria-label={`Discard target of migration ${session.Id}`}
                 onClick={() => confirmDiscard(session)}
               >
                 Discard target
@@ -307,6 +311,7 @@ export function MigrationsPage() {
         <MigrationTargetForm
           servers={servers.data ?? []}
           databases={databases.data ?? []}
+          serverStatuses={statuses}
           submitting={createSession.isPending}
           onCancel={() => setFormOpen(false)}
           onSubmit={(request, description) => setPending({ request, description })}

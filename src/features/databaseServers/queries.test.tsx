@@ -15,13 +15,11 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { databaseServersApi } from "@/api/databaseServers";
-import type {
-  DatabaseServerInfoItem,
-  ProbeDatabaseServerResponse,
-} from "@/api/types";
+import type { DatabaseServerInfoItem, ProbeDatabaseServerResponse } from "@/api/types";
 import {
   databaseServerKeys,
   useDatabaseServer,
+  useDatabaseServers,
   useProbeDatabaseServer,
 } from "./queries";
 
@@ -63,6 +61,32 @@ function makeClient() {
     },
   });
 }
+
+describe("useDatabaseServers", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("keeps no administrator password or certificate in the list cache", async () => {
+    vi.mocked(databaseServersApi.list).mockResolvedValueOnce([
+      {
+        ...sampleItem,
+        RootUserPassword: "Real-Admin-Pass!",
+        Certificate: "-----BEGIN CERTIFICATE-----",
+      },
+    ]);
+    const client = makeClient();
+    const { result } = renderHook(() => useDatabaseServers(), {
+      wrapper: makeWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const cached = client.getQueryData<DatabaseServerInfoItem[]>(
+      databaseServerKeys.all,
+    );
+    expect(cached?.[0].Name).toBe("primary-east");
+    expect(cached?.[0].RootUserPassword).toBe("");
+    expect(cached?.[0].Certificate).toBeNull();
+  });
+});
 
 describe("useDatabaseServer", () => {
   beforeEach(() => {
@@ -132,7 +156,8 @@ describe("useDatabaseServer", () => {
 describe("useProbeDatabaseServer", () => {
   const unsupported: ProbeDatabaseServerResponse = {
     Success: true,
-    Message: "This server cannot be registered: MySql 5.7 is below the supported minimum.",
+    Message:
+      "This server cannot be registered: MySql 5.7 is below the supported minimum.",
     Engine: "MySql",
     EngineVersion: "5.7.44",
     RawVersion: "5.7.44",
@@ -141,10 +166,15 @@ describe("useProbeDatabaseServer", () => {
     CanCreateDatabase: true,
     CanCreateUser: true,
     CanGrant: true,
+    CanSeeConnections: true,
     IsSupported: false,
     Checks: [
       { Name: "connect", Passed: true, Detail: "Connected to db.example:3306." },
-      { Name: "version", Passed: false, Detail: "MySql 5.7.44 is below the supported minimum of 8.0." },
+      {
+        Name: "version",
+        Passed: false,
+        Detail: "MySql 5.7.44 is below the supported minimum of 8.0.",
+      },
     ],
   };
 

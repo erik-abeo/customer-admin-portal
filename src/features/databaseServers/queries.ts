@@ -13,10 +13,28 @@ const KEYS = {
   detail: (id: number) => ["database-servers", id] as const,
 };
 
+/**
+ * A server with its decrypted administrator password and certificate removed.
+ * The list endpoint returns both for every server, and nearly every page uses
+ * the list only for names and ids, so they are dropped before the list reaches
+ * the query cache rather than kept there for every server on every page.
+ */
+export const withoutSecrets = (
+  server: DatabaseServerInfoItem,
+): DatabaseServerInfoItem => ({
+  ...server,
+  RootUserPassword: "",
+  Certificate: null,
+});
+
+/**
+ * Every server, without secrets. For a server's own password and certificate,
+ * which only the edit form needs, use {@link useDatabaseServer}.
+ */
 export function useDatabaseServers() {
   return useQuery({
     queryKey: KEYS.all,
-    queryFn: () => databaseServersApi.list(),
+    queryFn: async () => (await databaseServersApi.list()).map(withoutSecrets),
   });
 }
 
@@ -26,7 +44,9 @@ export function useDatabaseServers() {
  *
  * If the list cache (`useDatabaseServers`) already has a matching record,
  * that value is surfaced as `placeholderData` so deep-link visits paint
- * instantly while the by-id refetch happens in the background.
+ * instantly while the by-id refetch happens in the background. The placeholder
+ * has no secrets, so anything that needs them, the edit form above all, must
+ * wait until `isPlaceholderData` is false.
  */
 export function useDatabaseServer(id: number | undefined) {
   const qc = useQueryClient();

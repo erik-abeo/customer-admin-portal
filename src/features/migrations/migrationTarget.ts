@@ -4,6 +4,7 @@ import type {
   DatabaseServerInfoItem,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
+import { whyServerNotTakingCustomers } from "@/features/databaseServers/status";
 
 /**
  * Whether the migration streams into a database that already exists, or one
@@ -98,6 +99,19 @@ export const whyDatabaseNotSelectable = (
     return `belongs to customer ${database.CrystalPmId}`;
   return null;
 };
+
+/**
+ * Why a server cannot take this migration, or null when it can.
+ *
+ * Only an available server takes a new customer, so a key that provisions a
+ * database is refused on any other. A key against a database already there is
+ * a retry for a customer who is on it, and the service allows it, so the
+ * status matters only in provision mode.
+ */
+export const whyServerNotSelectable = (
+  mode: TargetMode,
+  status: string | null | undefined,
+): string | null => (mode === "provision" ? whyServerNotTakingCustomers(status) : null);
 
 /**
  * States the destination in plain words for the confirmation step, before any

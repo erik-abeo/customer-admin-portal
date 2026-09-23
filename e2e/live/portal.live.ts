@@ -302,7 +302,7 @@ test("mints a key shown once, then revokes it", async ({ page }) => {
   await page.getByRole("button", { name: /^Revoke key$/ }).click();
   await expect(row.getByText("revoked", { exact: true })).toBeVisible();
   // Nothing was created, so there is nothing to discard.
-  await expect(row.getByRole("button", { name: /^Discard the target/ })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: /^Discard target/ })).toHaveCount(0);
   expect(schemaExists(MYSQL_CONTAINER, "cpmp_mint_one")).toBe(false);
 
   await scan(page, "the migrations page");
@@ -354,10 +354,10 @@ test("revokes a redeemed key, which drops its login, then discards the database 
     ).trim(),
   ).toBe("0");
 
-  await row.getByRole("button", { name: /^Discard the target of migration/ }).click();
+  await row.getByRole("button", { name: /^Discard target of migration/ }).click();
   await page.getByRole("button", { name: /^Drop the database$/ }).click();
   await expect.poll(() => schemaExists(MYSQL_CONTAINER, "cpmp_mint_two")).toBe(false);
-  await expect(row.getByRole("button", { name: /^Discard the target/ })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: /^Discard target/ })).toHaveCount(0);
 });
 
 /** Plans a move of one database to live-mysql-b under a new name. */
@@ -426,7 +426,7 @@ test("moves a customer, rolls the move back, moves again and drops the source", 
     sql(MYSQL_CONTAINER, "SELECT COUNT(*) FROM `cpmp_move_a_moved`.patient").trim(),
   ).toBe("3");
 
-  await expect(first.getByRole("button", { name: /^Drop the source/ })).toBeVisible();
+  await expect(first.getByRole("button", { name: /^Drop source/ })).toBeVisible();
   await first
     .getByRole("button", { name: /^Roll back the move for customer 9101$/ })
     .click();
@@ -438,14 +438,14 @@ test("moves a customer, rolls the move back, moves again and drops the source", 
   expect(
     authSql("SELECT database_name FROM database_info WHERE crystalpm_id = 9101").trim(),
   ).toBe("cpmp_move_a");
-  await expect(first.getByRole("button", { name: /^Drop the source/ })).toHaveCount(0);
+  await expect(first.getByRole("button", { name: /^Drop source/ })).toHaveCount(0);
 
   const second = await planMove(page, "cpmp_move_a", "cpmp_move_a_final");
   await expect(second.getByText("flipped", { exact: true })).toBeVisible({
     timeout: 150_000,
   });
   await second
-    .getByRole("button", { name: /^Drop the source of the move for customer 9101$/ })
+    .getByRole("button", { name: /^Drop source of the move for customer 9101$/ })
     .click();
   await page.getByRole("button", { name: /^Drop the source$/ }).click();
   await expect(second.getByText("settled", { exact: true })).toBeVisible();

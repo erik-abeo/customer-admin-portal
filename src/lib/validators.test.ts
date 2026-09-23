@@ -7,6 +7,7 @@ import {
   identifier,
   maxLength,
   minLength,
+  notClearable,
   port,
   required,
   strongPassword,
@@ -131,6 +132,20 @@ describe("validators", () => {
       expect(v(undefined)).toBe("Name is required");
       expect(v("abcd")).toBe("Name must be 3 characters or fewer");
       expect(v("abc")).toBeNull();
+    });
+  });
+
+  describe("notClearable", () => {
+    it("refuses emptying a field that had a value, which the service would keep", () => {
+      const v = notClearable("Description", "Primary cluster");
+      expect(v("")).toMatch(/cannot be cleared/);
+      expect(v("   ")).toMatch(/cannot be cleared/);
+    });
+
+    it("allows a replacement, and a field that was empty to stay empty", () => {
+      expect(notClearable("Description", "Primary cluster")("Replica")).toBeNull();
+      expect(notClearable("Description", null)("")).toBeNull();
+      expect(notClearable("Description", "")("")).toBeNull();
     });
   });
 });

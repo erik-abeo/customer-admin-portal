@@ -401,9 +401,17 @@ export function DatabasesPage() {
             submitting={update.isPending}
             onSubmit={async (payload) => {
               try {
-                await update.mutateAsync(
+                const result = await update.mutateAsync(
                   payload as Parameters<typeof update.mutateAsync>[0],
                 );
+                // A refused update is a 200 with Success false, not a throw.
+                if (!result.Success) {
+                  notifyError(
+                    new Error(result.Message ?? "The database was not updated."),
+                    "Failed to update database",
+                  );
+                  return;
+                }
                 notifySuccess("Database updated");
                 setEditTarget(null);
               } catch (e) {

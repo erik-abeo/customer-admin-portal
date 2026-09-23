@@ -39,6 +39,13 @@ export interface DatabaseServerInfoItem {
   Certificate: string | null;
   /** AWS security group whose ingress rules gate access to this server. */
   SecurityGroupId: string | null;
+  /**
+   * `available` to take new customers, or another value such as `retiring`.
+   * Only an available server can have a new database provisioned on it or be
+   * the target of a move. Optional because a service older than this field
+   * does not send it.
+   */
+  Status?: string | null;
 }
 
 export interface CreateDatabaseServerInfoRequest {
@@ -63,7 +70,25 @@ export interface CreateDatabaseServerInfoResponse {
   Message: string | null;
 }
 
-export type UpdateDatabaseServerInfoRequest = DatabaseServerInfoItem;
+/**
+ * Mirrors the C# request. The service skips any string that is null, empty or
+ * whitespace, so null means "keep what is stored". The password and certificate
+ * are sent only when the operator changed them: sending the values the portal
+ * read earlier would write them back over a rotation made in the meantime.
+ */
+export interface UpdateDatabaseServerInfoRequest {
+  Id: number;
+  Name: string | null;
+  Description: string | null;
+  LocalServerAddress: string | null;
+  RemoteServerAddress: string | null;
+  ServerPort: number;
+  AdminUserName: string | null;
+  RootUserPassword: string | null;
+  Certificate: string | null;
+  /** "" clears the group; null keeps it. */
+  SecurityGroupId: string | null;
+}
 
 export interface UpdateDatabaseServerInfoResponse {
   Success: boolean;
@@ -134,7 +159,13 @@ export interface ProbeDatabaseServerResponse {
    * login access to the schema it provisions.
    */
   CanGrant: boolean;
-  /** Every gate passed, `CanGrant` included. */
+  /**
+   * Holds `PROCESS`, without which the login sees only its own connections, so
+   * revoking a migration, ending a session and draining a move would silently
+   * do nothing.
+   */
+  CanSeeConnections: boolean;
+  /** Every gate passed, `CanGrant` and `CanSeeConnections` included. */
   IsSupported: boolean;
   Checks: DatabaseServerProbeCheck[];
 }
@@ -501,6 +532,8 @@ export interface AuthorizedUserInfoItem {
   Email: string;
   UseStaticHost: boolean;
   StaticHost: string | null;
+  /** How many CrystalPM sessions the user may hold at once. At least 1. */
+  MaxLoginInstances: number;
   DatabaseMappings: DatabaseMapping[];
 }
 
@@ -509,15 +542,21 @@ export interface CreateUserRequest {
   Password: string;
   UseStaticHost: boolean;
   StaticHost: string | null;
+  MaxLoginInstances: number;
   DatabaseMappings: DatabaseMapping[];
 }
 
+/**
+ * The service writes every field, MaxLoginInstances included, defaulting a
+ * missing one to 1, so an update must always send the current value.
+ */
 export interface UpdateUserRequest {
   UserId: string;
   Email: string;
   Password?: string | null;
   UseStaticHost: boolean;
   StaticHost: string | null;
+  MaxLoginInstances: number;
   DatabaseMappings: DatabaseMapping[];
 }
 
@@ -568,25 +607,44 @@ export interface DatabaseServerPrivilegeInfo {
 }
 
 export interface CreateStaticDatabaseUserRequest {
-  UserPassword: string;
+  /** Ignored by the service, which always generates the password. Sent as null. */
+  UserPassword: string | null;
   Description: string | null;
   Servers: DatabaseServerPrivilegeInfo[];
 }
 
-export interface ServerAccessInfo {
-  ServerId: number;
-  ServerName?: string | null;
-  HostAddress?: string | null;
-  Port?: number | null;
-  UserName?: string | null;
-  Password?: string | null;
-  Message?: string | null;
+/** One database's outcome in a create response, mirroring the C# DatabaseAccessInfo. */
+export interface DatabaseAccessInfo {
+  DatabaseId: number;
+  DatabaseName: string | null;
+  Description: string | null;
+  Privileges: DatabasePrivileges | null;
+  Errors: string[] | null;
 }
 
+/**
+ * One server's outcome in a create response, mirroring the C# ServerAccessInfo.
+ * `UserPassword` is the generated password, the same on every server, and is
+ * returned only here.
+ */
+export interface ServerAccessInfo {
+  ServerId: number;
+  ServerName: string | null;
+  LocalServerAddress: string | null;
+  RemoteServerAddress: string | null;
+  /** Text on the wire: the service reads the column as a string. */
+  ServerPort: string | null;
+  UserPassword: string | null;
+  Certificate: string | null;
+  Databases: DatabaseAccessInfo[] | null;
+  Errors: string[] | null;
+}
+
+/** "Success" when nothing failed, "Failure" when any server or database did. */
 export interface CreateStaticDatabaseUserResponse {
   UserName: string;
   Message: string | null;
-  Servers: ServerAccessInfo[];
+  Servers: ServerAccessInfo[] | null;
 }
 
 export interface UpdateStaticDatabaseUserRequest {
@@ -597,16 +655,27 @@ export interface UpdateStaticDatabaseUserRequest {
   Servers: DatabaseServerPrivilegeInfo[];
 }
 
-export interface ServerUpdateInfo {
-  ServerId: number;
-  Message?: string | null;
+/** One database's outcome in an update response, mirroring the C# DatabaseUpdateInfo. */
+export interface DatabaseUpdateInfo {
+  DatabaseId: number;
+  DatabaseName: string | null;
+  Privileges: DatabasePrivileges | null;
+  Errors: string[] | null;
 }
 
+/** One server's outcome in an update response, mirroring the C# ServerUpdateInfo. */
+export interface ServerUpdateInfo {
+  ServerId: number;
+  Databases: DatabaseUpdateInfo[] | null;
+  Errors: string[] | null;
+}
+
+/** "Success" when nothing failed, "Failure" when any server or database did. */
 export interface UpdateStaticDatabaseUserResponse {
   UserName: string;
   Message: string | null;
   NewPassword: string | null;
-  Servers: ServerUpdateInfo[];
+  Servers: ServerUpdateInfo[] | null;
 }
 
 export interface GetStaticDatabaseUserResponse {

@@ -135,8 +135,22 @@ export function DatabaseServerDetailPage() {
                   </Badge>
                 </Fact>
                 <Fact label="SSL certificate">
-                  <Badge color={server.Certificate ? "teal" : "gray"} variant="light">
-                    {server.Certificate ? "Loaded" : "None"}
+                  {/* The list placeholder carries no certificate, so wait for the by-id read. */}
+                  <Badge
+                    color={
+                      serverQ.isPlaceholderData
+                        ? "gray"
+                        : server.Certificate
+                          ? "teal"
+                          : "gray"
+                    }
+                    variant="light"
+                  >
+                    {serverQ.isPlaceholderData
+                      ? "Checking"
+                      : server.Certificate
+                        ? "Loaded"
+                        : "None"}
                   </Badge>
                 </Fact>
               </SimpleGrid>
@@ -241,7 +255,8 @@ export function DatabaseServerDetailPage() {
         title="Edit server"
         size="lg"
       >
-        {server && (
+        {/* Only the by-id result carries the stored password and certificate. */}
+        {server && !serverQ.isPlaceholderData && (
           <DatabaseServerForm
             initial={server}
             submitLabel="Save changes"
@@ -313,9 +328,17 @@ export function DatabaseServerDetailPage() {
             submitting={updateDb.isPending}
             onSubmit={async (payload) => {
               try {
-                await updateDb.mutateAsync(
+                const result = await updateDb.mutateAsync(
                   payload as Parameters<typeof updateDb.mutateAsync>[0],
                 );
+                // A refused update is a 200 with Success false, not a throw.
+                if (!result.Success) {
+                  notifyError(
+                    new Error(result.Message ?? "The database was not updated."),
+                    "Failed to update database",
+                  );
+                  return;
+                }
                 notifySuccess("Database updated");
                 setEditDbTarget(null);
               } catch (e) {

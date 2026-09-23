@@ -114,7 +114,11 @@ export const recommendPlacement = (
   const unreachable = ranked.filter((s) => s.Verdict === "Unreachable").length;
 
   if (servers.length === 0) {
-    return { recommended: null, ranked, summary: "No database servers are registered yet." };
+    return {
+      recommended: null,
+      ranked,
+      summary: "No database servers are registered yet.",
+    };
   }
 
   const parts = ["No server has clear headroom."];

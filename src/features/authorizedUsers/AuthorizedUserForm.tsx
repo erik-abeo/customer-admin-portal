@@ -2,6 +2,7 @@ import {
   Button,
   Divider,
   Group,
+  NumberInput,
   PasswordInput,
   Stack,
   Switch,
@@ -34,6 +35,7 @@ interface AuthorizedUserFormValues {
   Password: string;
   UseStaticHost: boolean;
   StaticHost: string;
+  MaxLoginInstances: number;
   DatabaseMappings: DatabaseMapping[];
 }
 
@@ -64,6 +66,7 @@ export function AuthorizedUserForm({
       Password: "",
       UseStaticHost: initial?.UseStaticHost ?? false,
       StaticHost: initial?.StaticHost ?? "",
+      MaxLoginInstances: initial?.MaxLoginInstances ?? 1,
       DatabaseMappings: initial?.DatabaseMappings ?? [],
     },
     validateInputOnBlur: true,
@@ -77,6 +80,8 @@ export function AuthorizedUserForm({
         if (v.length === 0) return "Password is required";
         return strongPassword()(v);
       },
+      MaxLoginInstances: (v) =>
+        Number.isInteger(v) && v >= 1 ? null : "Allow at least 1 concurrent session",
       StaticHost: (v, all) => {
         if (!all.UseStaticHost) return null;
         if (v.trim().length === 0) return "Static host is required when enabled";
@@ -94,6 +99,7 @@ export function AuthorizedUserForm({
         Password: values.Password.length > 0 ? values.Password : null,
         UseStaticHost: values.UseStaticHost,
         StaticHost: values.UseStaticHost ? trimmedHost : null,
+        MaxLoginInstances: values.MaxLoginInstances,
         DatabaseMappings: values.DatabaseMappings,
       };
       await onSubmit(payload);
@@ -103,6 +109,7 @@ export function AuthorizedUserForm({
         Password: values.Password,
         UseStaticHost: values.UseStaticHost,
         StaticHost: values.UseStaticHost ? trimmedHost : null,
+        MaxLoginInstances: values.MaxLoginInstances,
         DatabaseMappings: values.DatabaseMappings,
       };
       await onSubmit(payload);
@@ -134,6 +141,14 @@ export function AuthorizedUserForm({
             required={!isEdit}
             autoComplete="new-password"
             {...form.getInputProps("Password")}
+          />
+          <NumberInput
+            label="Concurrent sessions"
+            description="How many CrystalPM sessions this user may have open at once."
+            min={1}
+            max={50}
+            allowDecimal={false}
+            {...form.getInputProps("MaxLoginInstances")}
           />
         </FormSection>
 

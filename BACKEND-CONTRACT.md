@@ -6,7 +6,7 @@ ASP.NET service. It covers:
 
 1. The **endpoints that already exist** and the shapes the SPA depends on
    (so any change there triggers a coordinated UI update).
-2. The **endpoints that are still pending** — the SPA already ships UI for
+2. The **endpoints that are still pending**: the SPA already ships UI for
    these, gated behind feature flags. The "Pending" sections below are
    meant to be implemented exactly as specified so the UI lights up
    without further frontend changes.
@@ -23,49 +23,62 @@ anyone ever removes the `AddJsonOptions` call in `Program.cs`, this document and
 the SPA both become wrong at once and silently. Request binding is
 case-insensitive, so callers sending camelCase bodies still work.
 
-Authentication: every endpoint accepts the static `api-key` request
-header (interim mechanism, validated server-side against
-`appsettings.json → api-key`). When you adopt service-to-service tokens,
-swap the SPA's `StaticApiKeyAuthStrategy` (`src/api/httpClient.ts`) for a
-new strategy — no other UI code needs to change.
+Authentication: every management endpoint the SPA calls accepts the static
+`api-key` request header (interim mechanism, validated server-side against
+the `api-key` setting in `appsettings.json`). The other endpoints on the same
+`/My` routes authenticate differently and are not for the SPA: the CrystalPM
+client's authorization calls (`AuthorizeClient`, `AuthorizeClient2`,
+`KeepAliveDatabaseUser`, `KillDatabaseUser`) take a SuperTokens JWT, and the
+installer's `redeem-migration-key` and `migration-session/*` take the
+migration key or the session token. When you adopt service-to-service tokens,
+swap the SPA's `StaticApiKeyAuthStrategy` (`src/api/httpClient.ts`) for a new
+strategy; no other UI code needs to change.
 
 Optional response header `X-Admin-Role`: when present, the SPA reads the
 caller's role from this header and gates write actions in the UI. Allowed
 values are `admin` (full write access) and `viewer` / `readonly`
-(read-only). The header is consumed by `src/api/httpClient.ts →
-captureRoleHeader`. If the header is absent, the SPA falls back to the
-default role configured by `VITE_FEATURE_RBAC`.
+(read-only). The header is consumed by `captureRoleHeader` in
+`src/api/httpClient.ts`. `VITE_FEATURE_RBAC` is a boolean switch, not a role:
+when it is off, every caller is treated as `admin`; when it is on and no
+header has been seen yet, the SPA treats the caller as `viewer` until one
+arrives.
 
 ---
 
 ## 1. Existing endpoints (do not break)
 
 The contract for each is the corresponding TypeScript DTO in
-[`src/api/types.ts`](./src/api/types.ts). Below are URL → DTO crosswalks.
+[`src/api/types.ts`](./src/api/types.ts). Below are URL-to-DTO crosswalks.
 
 | Method | URL                                              | Request DTO                       | Response DTO                          |
 | ------ | ------------------------------------------------ | --------------------------------- | ------------------------------------- |
 | POST   | `/My/create-database-server-info`                | `CreateDatabaseServerInfoRequest` | `CreateDatabaseServerInfoResponse`    |
 | PUT    | `/My/update-database-server-info`                | `UpdateDatabaseServerInfoRequest` | `UpdateDatabaseServerInfoResponse`    |
-| GET    | `/My/get-database-server-info/{id}`              | —                                 | `GetDatabaseServerInfoResponse`       |
-| GET    | `/My/get-all-database-server-info`               | —                                 | `GetAllDatabaseServerInfoResponse`    |
+| GET    | `/My/get-database-server-info/{id}`              | -                                 | `GetDatabaseServerInfoResponse`       |
+| GET    | `/My/get-all-database-server-info`               | -                                 | `GetAllDatabaseServerInfoResponse`    |
 | POST   | `/My/create-database-info`                       | `CreateDatabaseInfoRequest`       | `CreateDatabaseInfoResponse`          |
 | PUT    | `/My/update-database-info`                       | `UpdateDatabaseInfoRequest`       | `UpdateDatabaseInfoResponse`          |
-| GET    | `/My/get-database-info/{id}`                     | —                                 | `GetDatabaseInfoResponse`             |
-| GET    | `/My/get-all-database-info`                      | —                                 | `GetAllDatabaseInfoResponse`          |
-| POST   | `/My/create-user`                                | `CreateUserRequest`               | `{ Success, Message, UserId }`        |
-| PUT    | `/My/update-user`                                | `UpdateUserRequest`               | `{ Success, Message }`                |
-| DELETE | `/My/delete-user/{userId}`                       | —                                 | `{ Success, Message }`                |
-| GET    | `/My/get-user/{userId}`                          | —                                 | `GetAuthorizedUserResponse`           |
-| GET    | `/My/get-users`                                  | —                                 | `GetAuthorizedUsersResponse`          |
-| GET    | `/My/get-users/{databaseServerId}/{databaseId}`  | —                                 | `GetAuthorizedUsersResponse`          |
+| GET    | `/My/get-database-info/{id}`                     | -                                 | `GetDatabaseInfoResponse`             |
+| GET    | `/My/get-all-database-info`                      | -                                 | `GetAllDatabaseInfoResponse`          |
+| POST   | `/My/create-user`                                | `CreateUserRequest`               | plain string (see below)              |
+| PUT    | `/My/update-user`                                | `UpdateUserRequest`               | plain string (see below)              |
+| DELETE | `/My/delete-user/{userId}`                       | -                                 | plain string (see below)              |
+| GET    | `/My/get-user/{userId}`                          | -                                 | `GetAuthorizedUserResponse`           |
+| GET    | `/My/get-users`                                  | -                                 | `GetAuthorizedUsersResponse`          |
+| GET    | `/My/get-users/{databaseServerId}/{databaseId}`  | -                                 | `GetAuthorizedUsersResponse`          |
 | POST   | `/My/create-static-database-user`                | `CreateStaticDatabaseUserRequest` | `CreateStaticDatabaseUserResponse`    |
 | PUT    | `/My/update-static-database-user`                | `UpdateStaticDatabaseUserRequest` | `UpdateStaticDatabaseUserResponse`    |
-| GET    | `/My/get-static-database-user/{id}`              | —                                 | `GetStaticDatabaseUserDetailResponse` |
-| GET    | `/My/get-all-static-database-users`              | —                                 | `GetStaticDatabaseUserResponse[]`     |
-| GET    | `/My/get-static-database-users-by-server/{id}`   | —                                 | `GetStaticDatabaseUserResponse[]`     |
-| GET    | `/My/get-static-database-users-by-database/{id}` | —                                 | `GetStaticDatabaseUserResponse[]`     |
+| GET    | `/My/get-static-database-user/{id}`              | -                                 | `GetStaticDatabaseUserDetailResponse` |
+| GET    | `/My/get-all-static-database-users`              | -                                 | `GetStaticDatabaseUserResponse[]`     |
+| GET    | `/My/get-static-database-users-by-server/{id}`   | -                                 | `GetStaticDatabaseUserResponse[]`     |
+| GET    | `/My/get-static-database-users-by-database/{id}` | -                                 | `GetStaticDatabaseUserResponse[]`     |
 | POST   | `/My/probe-database-server`                      | `ProbeDatabaseServerRequest`      | `ProbeDatabaseServerResponse`         |
+
+`create-user`, `update-user` and `delete-user` answer with a plain string on
+success ("User created successfully" and so on) and a plain string or a
+SuperTokens error object on a 400, not a `{ Success, Message }` object. The SPA
+does not read the success body; failures surface through the HTTP status, and
+the error interceptor shows a string body as the message.
 
 ### 1.1 Database server probe
 
@@ -86,7 +99,7 @@ from the banner, with MariaDB's `5.5.5-` compatibility prefix stripped first.
   "Host": "customer-a.abc123.us-east-1.rds.amazonaws.com",
   "Port": "3306",              // optional, defaults to 3306
   "User": "cpmadmin",
-  "Password": "…",             // never persisted by the probe
+  "Password": "...",           // never persisted by the probe
   "SslMode": "Required",       // optional, defaults to Required
   "CertificatePem": null,      // optional, for VerifyCA / VerifyFull
 }
@@ -103,15 +116,17 @@ from the banner, with MariaDB's `5.5.5-` compatibility prefix stripped first.
   "CanCreateDatabase": true,
   "CanCreateUser": true,
   "CanGrant": true,            // holds GRANT OPTION; required
+  "CanSeeConnections": true,   // holds PROCESS; required
   "IsSupported": true,         // gate registration on THIS, not on Success
   "Checks": [
-    { "Name": "connect", "Passed": true, "Detail": "Connected to …:3306." },
+    { "Name": "connect", "Passed": true, "Detail": "Connected to ...:3306." },
     { "Name": "engine", "Passed": true, "Detail": "Detected MySql from the server itself." },
     { "Name": "version", "Passed": true, "Detail": "MySql 8.4.3 meets the 8.0 minimum." },
     { "Name": "tls", "Passed": true, "Detail": "TLS negotiated (TLS_AES_256_GCM_SHA384)." },
     { "Name": "privileges.create-database", "Passed": true, "Detail": "Login can create databases." },
     { "Name": "privileges.create-user", "Passed": true, "Detail": "Login can create users." },
     { "Name": "privileges.grant-option", "Passed": true, "Detail": "Login holds GRANT OPTION." },
+    { "Name": "privileges.process", "Passed": true, "Detail": "Login can see other logins' connections." },
   ],
 }
 ```
@@ -119,7 +134,11 @@ from the banner, with MariaDB's `5.5.5-` compatibility prefix stripped first.
 `IsSupported` requires every gate, `CanGrant` included: without `GRANT OPTION`
 the service cannot give a migration login access to the schema it provisions,
 so a server whose login lacks it is refused at registration rather than at the
-first redemption.
+first redemption. `CanSeeConnections` is a gate too: without `PROCESS` the login
+sees only its own connections in the process list, so revoking a migration,
+ending a CrystalPM session and draining a move would all report success having
+done nothing. Its check is `privileges.process`, and a rejection names it in
+`Message` ("the login cannot see other logins' connections (PROCESS)").
 
 `Success: false` means the probe could not run at all, typically an unreachable
 host or a bad password, and `Checks` will hold a single failed `connect` entry.
@@ -162,6 +181,10 @@ whitespace, so those fields cannot be cleared through the API: `Name`,
 leaves it alone and an empty string clears it, so the portal sends `""` when the
 field is emptied. `UpdateDatabaseServerInfoResponse.Success` can be false on a
 200, and the portal checks it before reporting success.
+
+On create, blank optional fields (`Description`, `RemoteServerAddress`,
+`SecurityGroupId`) are stored as NULL, so "not set" has one meaning for
+everything that reads them. The portal sends null for them already.
 
 `database_server_info` records an **`AdminUserName`** per server, and it appears
 on `CreateDatabaseServerInfoRequest`, `UpdateDatabaseServerInfoRequest`,
@@ -215,11 +238,11 @@ refusal stays the backstop for a status that changed after the list was loaded.
 
 ### 1.5 Server capacity and placement
 
-| Method | URL | Response |
-| ------ | --- | -------- |
-| GET | `/My/get-fleet-capacity` | `GetFleetCapacityResponse` |
-| GET | `/My/get-server-capacity/{id}` | `GetServerCapacityResponse` |
-| GET | `/My/get-server-capacity-history/{id}?days=90` | `GetServerCapacityHistoryResponse` |
+| Method | URL                                            | Response                           |
+| ------ | ---------------------------------------------- | ---------------------------------- |
+| GET    | `/My/get-fleet-capacity`                       | `GetFleetCapacityResponse`         |
+| GET    | `/My/get-server-capacity/{id}`                 | `GetServerCapacityResponse`        |
+| GET    | `/My/get-server-capacity-history/{id}?days=90` | `GetServerCapacityHistoryResponse` |
 
 Measured live on each call rather than served from a cache. Three sources: the
 authorization database for who is registered where, the server's own
@@ -236,7 +259,7 @@ Two things the UI must not flatten:
 **`Unreachable` is a result, not an error.** One server nobody can reach must
 not stop the rest of the fleet being shown, and it is itself worth knowing: a
 server that cannot be queried is not one to place a customer on. It ranks
-*below* `Full`, because a full server is a known quantity with no room while an
+_below_ `Full`, because a full server is a known quantity with no room while an
 unreachable one has unknown contents.
 
 **`IsOrphaned` on a database means it is registered here but absent from the
@@ -264,14 +287,14 @@ that exists but has no snapshots in the window answers 200 with an empty
 
 Moving a customer's database from one server to another.
 
-| Method | URL | Request | Response |
-| ------ | --- | ------- | -------- |
-| POST | `/My/create-customer-move` | `CreateCustomerMoveRequest` | `CustomerMoveResult` |
-| GET | `/My/get-customer-moves` | — | `GetCustomerMovesResponse` |
-| GET | `/My/get-customer-move/{id}` | — | `GetCustomerMoveResponse` |
-| POST | `/My/cancel-customer-move/{id}` | — | `CustomerMoveResult` |
-| POST | `/My/roll-back-customer-move/{id}` | — | `CustomerMoveResult` |
-| POST | `/My/drop-customer-move-source/{id}` | — | `CustomerMoveResult` |
+| Method | URL                                  | Request                     | Response                   |
+| ------ | ------------------------------------ | --------------------------- | -------------------------- |
+| POST   | `/My/create-customer-move`           | `CreateCustomerMoveRequest` | `CustomerMoveResult`       |
+| GET    | `/My/get-customer-moves`             | -                           | `GetCustomerMovesResponse` |
+| GET    | `/My/get-customer-move/{id}`         | -                           | `GetCustomerMoveResponse`  |
+| POST   | `/My/cancel-customer-move/{id}`      | -                           | `CustomerMoveResult`       |
+| POST   | `/My/roll-back-customer-move/{id}`   | -                           | `CustomerMoveResult`       |
+| POST   | `/My/drop-customer-move-source/{id}` | -                           | `CustomerMoveResult`       |
 
 These record intent. The work runs in a background executor, so the portal plans
 a move and then watches it: `planned` to `draining` to `copying` to `verifying`
@@ -279,6 +302,12 @@ to `flipped`, plus `failed`, `cancelled` and `rolled_back`, and `settled` once
 the source is dropped. `CreateCustomerMoveRequest` is `DatabaseId`,
 `TargetDatabaseServerId`, `TargetDatabaseName` (null keeps the source's name)
 and `RequestedByAdmin`; there is no disconnect option.
+
+The target schema is created with the source schema's default character set and
+collation, read from `information_schema.SCHEMATA`, rather than the target
+server's default. Each table's DDL carries its own collation across, but the
+schema default decides what a table created after cutover gets, and a mismatch
+would make CrystalPM's first new table refuse to join with the copied ones.
 
 **The customer cannot start new sessions from `draining` until the move
 finishes, and is offline outright during `copying` and `verifying`.** Planning
@@ -327,16 +356,26 @@ if a server is replaced under a move already in flight.
 
 `create-customer-move` answers 400 with a `Message` for:
 
-* a database that is not `active`, for example suspended or already moving;
-* a database that static database users hold privileges on, since moves do not
+- a database that does not exist;
+- a target server that does not exist, or is not marked `available`;
+- a database that is not `active`, for example suspended or already moving;
+- a database that static database users hold privileges on, since moves do not
   carry static users yet;
-* a customer that already has a move in flight, or one that has cut over and
-  not been settled or rolled back;
-* a target server the customer is already on;
-* a target database name that is already registered on the target server, for
+- a migration that is still streaming into the database (`redeemed` or
+  `streaming`), since quiescing does not stop the installer's login;
+- a customer that already has a move in flight, one that has cut over and not
+  been settled or rolled back, or one whose source drop never finished;
+- a target server the customer is already on;
+- a target database name that is already registered on the target server, for
   any customer;
-* a customer that already has a registration on the target server, since the
-  flip would collide with it.
+- a customer that already has a registration on the target server, since the
+  flip would collide with it;
+- a target name that is not a usable identifier (letters, digits and
+  underscores, starting with a letter);
+- a database with no recorded name, so there is nothing to copy from.
+
+It answers 409 when another move for the same customer was planned at the same
+moment and won; refresh to see it.
 
 Planning then checks the live target as well, and fails the move without
 quiescing anyone if a schema of that name already exists there, registered or
@@ -357,12 +396,12 @@ The streaming-migration flow. The portal mints a key for one customer's move and
 shows it once; the operator pastes it into the MariaDB installer, which redeems
 it for credentials scoped to that one schema and streams the database in.
 
-| Method | URL | Request | Response |
-| ------ | --- | ------- | -------- |
-| POST | `/My/create-migration-session` | `CreateMigrationSessionRequest` | `CreateMigrationSessionResponse` |
-| GET | `/My/get-migration-sessions` | — | `GetMigrationSessionsResponse` |
-| GET | `/My/get-migration-session/{id}` | — | `GetMigrationSessionResponse` |
-| POST | `/My/revoke-migration-session/{id}` | — | `{ Success, Message }` |
+| Method | URL                                 | Request                         | Response                         |
+| ------ | ----------------------------------- | ------------------------------- | -------------------------------- |
+| POST   | `/My/create-migration-session`      | `CreateMigrationSessionRequest` | `CreateMigrationSessionResponse` |
+| GET    | `/My/get-migration-sessions`        | -                               | `GetMigrationSessionsResponse`   |
+| GET    | `/My/get-migration-session/{id}`    | -                               | `GetMigrationSessionResponse`    |
+| POST   | `/My/revoke-migration-session/{id}` | -                               | `{ Success, Message }`           |
 
 Three further endpoints exist for the installer and are **not for the portal**:
 `redeem-migration-key`, `migration-session/heartbeat` and
@@ -374,6 +413,15 @@ machine on an office network which has no business holding the admin key.
 `DatabaseName` (one to provision). Both or neither is a 400: the two readings do
 different things to a customer's data. An existing database must be on the named
 server and must already belong to the named customer.
+
+A `DatabaseServerId` that does not exist is a 400 ("Database server N does not
+exist."). A name to provision is refused with a 400 when the server's recorded
+status is anything but `available`, the same rule capacity applies to new
+customers. A key against an existing database on such a server is still
+allowed, since it is a retry for a customer already there. The status is on the
+capacity reading (`ServerCapacity.Status`), not on `DatabaseServerInfoItem`, and
+the portal reads it from there to disable those servers in its pickers, with the
+reason, for a key that provisions and for a move's target.
 
 A name to provision is also a 400 when this customer already has any database on
 that server (select it as the existing database instead), when the name is
@@ -394,7 +442,7 @@ label, in any case, with dashes, spaces or nothing between the groups, and with
 `I`, `L` and `O` read as `1`, `1` and `0`. Show it as `CPM-XXXX-XXXX-XXXX-XXXX`:
 four groups of Crockford base32, 80 bits. `MigrationKeyPrefix` is the first
 group, 20 of those bits, and is safe to list afterwards; describe it as the key
-*starting* with it. The operator does not need to be told any of this.
+_starting_ with it. The operator does not need to be told any of this.
 
 ```jsonc
 // CreateMigrationSessionRequest
@@ -429,13 +477,13 @@ minting another and revoking this one. Record the signed-in operator as
 
 **`TargetSummary` describes what was minted.** It names the customer and
 destination, and appends a warning when that customer already has a database on
-a different server — legal, since `crystalpm_id` is unique per server rather
+a different server. That is legal, since `crystalpm_id` is unique per server rather
 than globally, and also exactly what a customer being split across two servers
 looks like. It only comes back from `create-migration-session`, so it can only
 be shown after minting, alongside the key. The confirm step before minting
 states the destination from the portal's own selection instead.
 
-**Statuses**: `pending` → `redeemed` → `streaming` → `completed` | `failed`,
+**Statuses**: `pending`, then `redeemed`, then `streaming`, then `completed` | `failed`,
 plus `expired` and `revoked`. `get-migration-sessions` sweeps expiries before
 returning, so the list does not show dead keys as pending.
 
@@ -470,11 +518,16 @@ true, `DatabaseId` is not null and the status is `failed`, `revoked` or
 
 It also refuses, with `Success: false` and a message naming why, when:
 
-* another session streamed into the same database and did not fail. A retry is
+- another session streamed into the same database and did not fail. A retry is
   minted against the first attempt's database as an existing one; once that
   retry succeeds, or while it runs, the database is the customer's;
-* any authorized user is mapped to the database, any static user holds
+- any authorized user is mapped to the database, any static user holds
   privileges on it, or any move refers to it.
+
+It answers **409** with a `Message` when the database's registration has been
+repointed since the session created it: another schema name, or the same name
+on another server. Dropping it then would drop something this session never
+made. The portal shows the `Message` as it does for every other 409.
 
 Dropping detaches the sessions that pointed at the database rather than deleting
 them, so the history survives. A second discard of the same session answers
@@ -493,7 +546,9 @@ is a 400 saying so, and an unexpected failure is a 500. Every other refusal is
 certificate, the credentials carry it as `CertificatePem` with `SslMode`
 `VerifyCA`, and the installer verifies the server against it; otherwise
 `SslMode` is `Required`. This is the installer's concern, but it is why the
-certificate is required at registration.
+certificate is required at registration. The temporary migration login is
+created with `REQUIRE SSL`, so the server refuses it over a plaintext
+connection whatever the installer asks for.
 
 **Abandoned sessions close themselves.** The service sweeps every five minutes
 and fails any session that has not reported for fifteen, dropping the temporary
@@ -508,16 +563,16 @@ message as detail; a failed action shows a red notification from `notifyError`
 with the message and `(status N)`. Queries are not retried on 4xx.
 `Retry-After` is not read.
 
-| Status | Failed page load (`QueryStatus`)                          | Failed action (`notifyError`)  |
-| ------ | --------------------------------------------------------- | ------------------------------ |
-| 0      | "Cannot reach the API", with retry                        | message                        |
-| 401    | Every 401 signs the operator out, clears the query cache and returns to `/login` | same |
-| 403    | "You don't have access to this"                           | message (status 403)           |
-| 404    | "Not found", with retry                                   | message (status 404)           |
-| 400, 422 | "Validation failed"                                     | message (status 400)           |
-| 409    | "This record changed somewhere else"                      | message (status 409)           |
-| 429    | "Too many requests"                                       | message (status 429)           |
-| 5xx    | "The server hit a problem", with retry                    | message (status 5xx)           |
+| Status   | Failed page load (`QueryStatus`)                                                 | Failed action (`notifyError`) |
+| -------- | -------------------------------------------------------------------------------- | ----------------------------- |
+| 0        | "Cannot reach the API", with retry                                               | message                       |
+| 401      | Every 401 signs the operator out, clears the query cache and returns to `/login` | same                          |
+| 403      | "You don't have access to this"                                                  | message (status 403)          |
+| 404      | "Not found", with retry                                                          | message (status 404)          |
+| 400, 422 | "Validation failed"                                                              | message (status 400)          |
+| 409      | "This record changed somewhere else"                                             | message (status 409)          |
+| 429      | "Too many requests"                                                              | message (status 429)          |
+| 5xx      | "The server hit a problem", with retry                                           | message (status 5xx)          |
 
 A refusal the service answers as 200 with `Success: false` is not an error to
 the client; each action checks `Success` and shows the `Message` itself.
@@ -551,7 +606,7 @@ in `src/api/types.ts`.
 
 | Method | URL                        | Body / Params                                                                                                                                                                          | Response                |
 | ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| GET    | `/My/event-log`            | Query: `userEmail`, `ipAddress`, `databaseServerId`, `databaseId`, `fromUtc`, `toUtc`, `eventType`, `page` (1-based), `pageSize` (≤500).                                               | `EventLogQueryResponse` |
+| GET    | `/My/event-log`            | Query: `userEmail`, `ipAddress`, `databaseServerId`, `databaseId`, `fromUtc`, `toUtc`, `eventType`, `page` (1-based), `pageSize` (at most 500).                                        | `EventLogQueryResponse` |
 | GET    | `/My/event-log/export.csv` | Same query parameters as `/event-log`. Returns `text/csv; charset=utf-8` with header row: `Id,TimestampUtc,UserEmail,IpAddress,DatabaseServerId,DatabaseId,EventType,Message,Details`. | CSV blob                |
 
 Notes:
@@ -569,7 +624,7 @@ Notes:
 
 The SPA can mirror its in-memory audit-log buffer to a backend endpoint
 that you control. There is no required URL or shape from the API
-service's perspective — `VITE_AUDIT_SINK_URL` points the SPA wherever
+service's perspective: `VITE_AUDIT_SINK_URL` points the SPA wherever
 you want the entries to land. The body for each `POST` is a single
 `AuditEntry`:
 
@@ -582,7 +637,7 @@ you want the entries to land. The body for each `POST` is a single
   "durationMs": 142,
   "adminName": "erik.griffin",
   "summary": "create database server",
-  "requestId": "5b1f…",
+  "requestId": "5b1f...",
 }
 ```
 
@@ -595,7 +650,7 @@ the SPA's `httpClient`.
 ## 3. Versioning & change management
 
 - Endpoints below `/My/` are considered v1 and stable. Breaking shape
-  changes require a parallel `/v2/` route — the SPA will switch over in a
+  changes require a parallel `/v2/` route, and the SPA will switch over in a
   coordinated release.
 - Adding new optional fields to existing DTOs is non-breaking; the SPA's
   type definitions accept and ignore unknown properties.

@@ -54,12 +54,18 @@ import {
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
+import {
+  generatedPassword,
+  hasFailures,
+  serverOutcomes,
+  type ServerOutcome,
+} from "@/features/staticUsers/outcome";
 
 interface SecretReveal {
   title: string;
   userName: string;
   password?: string | null;
-  servers?: { ServerId: number; Message?: string | null }[];
+  servers?: ServerOutcome[];
 }
 
 interface GroupedStaticUser {
@@ -407,16 +413,26 @@ export function StaticUsersPage() {
               const res = (await create.mutateAsync(
                 payload as Parameters<typeof create.mutateAsync>[0],
               )) as CreateStaticDatabaseUserResponse;
-              notifySuccess(`Created ${res.UserName}`);
               createCtl.close();
+              // Shown whether or not every server succeeded: the password is only
+              // ever returned here, and the per-server list says what failed.
+              if (hasFailures(res)) {
+                notifyError(
+                  new Error(
+                    `${res.UserName} was created with errors. See the per-server status.`,
+                  ),
+                  "Static user partly created",
+                );
+              } else {
+                notifySuccess(`Created ${res.UserName}`);
+              }
               setSecret({
-                title: "Static user created",
+                title: hasFailures(res)
+                  ? "Static user created with errors"
+                  : "Static user created",
                 userName: res.UserName,
-                password: res.Servers?.[0]?.Password ?? null,
-                servers: res.Servers?.map((s) => ({
-                  ServerId: s.ServerId,
-                  Message: s.Message,
-                })),
+                password: generatedPassword(res),
+                servers: serverOutcomes(res),
               });
             } catch (e) {
               notifyError(e, "Failed to create static user");
@@ -451,15 +467,29 @@ export function StaticUsersPage() {
                 const res = (await update.mutateAsync(
                   payload as Parameters<typeof update.mutateAsync>[0],
                 )) as UpdateStaticDatabaseUserResponse;
-                notifySuccess(`Updated ${res.UserName}`);
                 setEditTarget(null);
                 setEditInitialServers(null);
-                if (res.NewPassword) {
+                const failed = hasFailures(res);
+                if (failed) {
+                  notifyError(
+                    new Error(
+                      serverOutcomes(res)
+                        .flatMap((o) => o.Errors)
+                        .join(" ") || `Some changes to ${res.UserName} did not apply.`,
+                    ),
+                    `Update of ${res.UserName} partly failed`,
+                  );
+                } else {
+                  notifySuccess(`Updated ${res.UserName}`);
+                }
+                if (res.NewPassword || failed) {
                   setSecret({
-                    title: "Password rotated",
+                    title: res.NewPassword
+                      ? "Password rotated"
+                      : `Update of ${res.UserName}`,
                     userName: res.UserName,
                     password: res.NewPassword,
-                    servers: res.Servers,
+                    servers: serverOutcomes(res),
                   });
                 }
               } catch (e) {
@@ -479,10 +509,12 @@ export function StaticUsersPage() {
       >
         {secret && (
           <Stack gap="md">
-            <Alert color="yellow" variant="light">
-              These credentials are shown only once. Copy and store them securely now —
-              they cannot be retrieved later.
-            </Alert>
+            {secret.password && (
+              <Alert color="yellow" variant="light">
+                These credentials are shown only once. Copy and store them securely now;
+                they cannot be retrieved later.
+              </Alert>
+            )}
             <Stack gap={4}>
               <Text size="sm" fw={500}>
                 Username
@@ -491,8 +523,12 @@ export function StaticUsersPage() {
                 <Code>{secret.userName}</Code>
                 <CopyButton value={secret.userName}>
                   {({ copied, copy }) => (
-                    <Tooltip label={copied ? "Copied" : "Copy"}>
-                      <ActionIcon variant="subtle" onClick={copy} aria-label="Copy">
+                    <Tooltip label={copied ? "Copied" : "Copy username"}>
+                      <ActionIcon
+                        variant="subtle"
+                        onClick={copy}
+                        aria-label="Copy username"
+                      >
                         {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
                       </ActionIcon>
                     </Tooltip>
@@ -509,8 +545,12 @@ export function StaticUsersPage() {
                   <Code>{secret.password}</Code>
                   <CopyButton value={secret.password}>
                     {({ copied, copy }) => (
-                      <Tooltip label={copied ? "Copied" : "Copy"}>
-                        <ActionIcon variant="subtle" onClick={copy} aria-label="Copy">
+                      <Tooltip label={copied ? "Copied" : "Copy password"}>
+                        <ActionIcon
+                          variant="subtle"
+                          onClick={copy}
+                          aria-label="Copy password"
+                        >
                           {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
                         </ActionIcon>
                       </Tooltip>
@@ -525,9 +565,9 @@ export function StaticUsersPage() {
                   Per-server status
                 </Text>
                 {secret.servers.map((s) => (
-                  <Text key={s.ServerId} size="xs" c="dimmed">
+                  <Text key={s.ServerId} size="xs" c={s.Failed ? "red" : "dimmed"}>
                     {serverNameById[s.ServerId] ?? `Server #${s.ServerId}`}:{" "}
-                    {s.Message ?? "OK"}
+                    {s.Failed ? `Failed. ${s.Errors.join(" ")}` : "OK"}
                   </Text>
                 ))}
               </Stack>

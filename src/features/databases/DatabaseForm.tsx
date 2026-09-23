@@ -18,7 +18,13 @@ import type {
   UpdateDatabaseInfoRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
-import { composeValidators, identifier, maxLength, required } from "@/lib/validators";
+import {
+  composeValidators,
+  identifier,
+  maxLength,
+  notClearable,
+  required,
+} from "@/lib/validators";
 
 interface DatabaseFormValues {
   DatabaseServerId: number | null;
@@ -63,7 +69,10 @@ export function DatabaseForm({
         required("Database name"),
         identifier("Database name"),
       ),
-      Description: maxLength(500, "Description"),
+      Description: composeValidators(
+        maxLength(500, "Description"),
+        notClearable("Description", initial?.Description),
+      ),
       CrystalPmId: (v) => {
         if (v === "" || v === null) return "CrystalPM ID is required";
         const n = Number(v);

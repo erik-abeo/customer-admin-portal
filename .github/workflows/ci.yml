@@ -76,11 +76,10 @@ jobs:
       - name: Run Playwright tests
         env:
           CI: "true"
-          # Same harmless defaults as the build job — the E2E suite mocks
-          # /My/** routes via Playwright `page.route`, so no real backend
-          # is needed.
-          VITE_API_BASE_URL: https://example.invalid
-          VITE_APP_NAME: Customer Admin Portal
+          # No VITE_* overrides here. The e2e build takes them from .env.test,
+          # whose VITE_API_BASE_URL=http://api.test is the origin the mocks in
+          # e2e/helpers/mockApi.ts intercept; an environment variable would take
+          # precedence over it and leave every API call unmocked.
         run: npm run test:e2e
 
       - name: Upload Playwright report

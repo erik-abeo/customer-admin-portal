@@ -92,6 +92,38 @@ describe("DatabaseServerForm", () => {
     expect(submitButton("Register")).toBeDisabled();
   });
 
+  it("keeps a server whose login lacks PROCESS unregistrable and says why", async () => {
+    const processDetail =
+      "Login lacks PROCESS, so it cannot see or end other logins' connections.";
+    vi.mocked(databaseServersApi.probe).mockResolvedValue({
+      ...passing,
+      IsSupported: false,
+      CanSeeConnections: false,
+      Message:
+        "This server cannot be registered: the login cannot see other logins' connections (PROCESS).",
+      Checks: [
+        {
+          Name: "privileges.grant-option",
+          Passed: true,
+          Detail: "Login holds GRANT OPTION.",
+        },
+        { Name: "privileges.process", Passed: false, Detail: processDetail },
+      ],
+    });
+    renderForm();
+
+    type(/^Name/, "db-east-1");
+    type(/^Local server address/, "db-east-1.internal");
+    type(/^Administrator password/, "Str0ng-Passw0rd!");
+    fireEvent.click(screen.getByRole("button", { name: /Test connection/ }));
+
+    expect(await screen.findByText(processDetail)).toBeInTheDocument();
+    expect(
+      screen.getByText(/cannot see other logins' connections \(PROCESS\)/),
+    ).toBeInTheDocument();
+    expect(submitButton("Register")).toBeDisabled();
+  });
+
   it("does not gate an edit that leaves the connection alone", () => {
     renderForm(stored);
 

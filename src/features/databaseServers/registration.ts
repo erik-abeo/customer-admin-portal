@@ -41,6 +41,28 @@ export function effectiveConnection(
 }
 
 /**
+ * The password and certificate an edit should send: each only when the operator
+ * typed a new one, otherwise null so the service keeps what it has. The stored
+ * values this form was opened with may already be out of date, if somebody
+ * rotated them since, so they are never sent back.
+ */
+export function changedSecrets(
+  values: Pick<ServerConnectionValues, "RootUserPassword" | "Certificate">,
+  initial: DatabaseServerInfoItem,
+): { RootUserPassword: string | null; Certificate: string | null } {
+  const password = values.RootUserPassword;
+  const certificate = values.Certificate.trim();
+  return {
+    RootUserPassword:
+      password.length > 0 && password !== initial.RootUserPassword ? password : null,
+    Certificate:
+      certificate.length > 0 && certificate !== (initial.Certificate ?? "").trim()
+        ? certificate
+        : null,
+  };
+}
+
+/**
  * Whether an edit changes anything the service connects with: the address,
  * port, admin login, password or certificate. A name, description or security
  * group change does not.

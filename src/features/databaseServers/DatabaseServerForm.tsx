@@ -39,6 +39,7 @@ import { FormSection } from "@/components/common/FormSection";
 import { useProbeDatabaseServer } from "@/features/databaseServers/queries";
 import {
   canSubmitServer,
+  changedSecrets,
   connectionChanged,
   effectiveConnection,
   probeSslMode,
@@ -47,6 +48,7 @@ import {
   composeValidators,
   hostname,
   maxLength,
+  notClearable,
   port,
   required,
 } from "@/lib/validators";
@@ -100,12 +102,18 @@ export function DatabaseServerForm({
     validateInputOnBlur: true,
     validate: {
       Name: composeValidators(required("Name"), maxLength(64, "Name")),
-      Description: maxLength(500, "Description"),
+      Description: composeValidators(
+        maxLength(500, "Description"),
+        notClearable("Description", initial?.Description),
+      ),
       LocalServerAddress: composeValidators(
         required("Local server address"),
         hostname("Local server address"),
       ),
-      RemoteServerAddress: hostname("Remote server address"),
+      RemoteServerAddress: composeValidators(
+        hostname("Remote server address"),
+        notClearable("Remote server address", initial?.RemoteServerAddress),
+      ),
       ServerPort: port("Server port"),
       AdminUserName: composeValidators(
         required("Administrator username"),
@@ -147,13 +155,21 @@ export function DatabaseServerForm({
   // result, so changing any connection field again withdraws it.
   const [savingAnywayFor, setSavingAnywayFor] = useState<string | null>(null);
   const savingWithoutPassingProbe = savingAnywayFor === probeInputs;
-  const canSubmit = canSubmitServer(isEdit, changesConnection, probeResult, savingWithoutPassingProbe);
-  const offerSaveAnyway = isEdit && changesConnection && probeResult?.IsSupported !== true;
+  const canSubmit = canSubmitServer(
+    isEdit,
+    changesConnection,
+    probeResult,
+    savingWithoutPassingProbe,
+  );
+  const offerSaveAnyway =
+    isEdit && changesConnection && probeResult?.IsSupported !== true;
 
   // The probe needs somewhere to connect and something to connect as. On edit
   // the stored password is used when the field is left blank.
   const canProbe =
-    connection.Host.length > 0 && connection.User.length > 0 && connection.Password.length > 0;
+    connection.Host.length > 0 &&
+    connection.User.length > 0 &&
+    connection.Password.length > 0;
 
   const runProbe = async () => {
     setProbed(null);
@@ -203,15 +219,11 @@ export function DatabaseServerForm({
       const payload: UpdateDatabaseServerInfoRequest = {
         Id: initial.Id,
         ...base,
-        // Blank on edit sends null, which the service reads as "keep the stored one".
-        Certificate: values.Certificate.trim() || null,
+        // Only what the operator typed; null keeps the stored value.
+        ...changedSecrets(values, initial),
         // The service clears the group on an empty string and ignores null, so a
         // cleared field is sent as "" to actually remove it.
         SecurityGroupId: values.SecurityGroupId.trim(),
-        RootUserPassword:
-          values.RootUserPassword.length > 0
-            ? values.RootUserPassword
-            : initial.RootUserPassword,
       };
       await onSubmit(payload);
     } else {
@@ -378,7 +390,13 @@ export function DatabaseServerForm({
               <Alert
                 variant="light"
                 color={probeResult.IsSupported ? "teal" : "red"}
-                icon={probeResult.IsSupported ? <IconCheck size={14} /> : <IconX size={14} />}
+                icon={
+                  probeResult.IsSupported ? (
+                    <IconCheck size={14} />
+                  ) : (
+                    <IconX size={14} />
+                  )
+                }
                 p="xs"
               >
                 <Text size="xs">{probeResult.Message}</Text>
@@ -446,7 +464,9 @@ export function DatabaseServerForm({
           <Checkbox
             label="Save without a passing probe. Use this only when the server is known to be reachable and a probe cannot pass yet, such as a new CA staged before the certificate rotates."
             checked={savingWithoutPassingProbe}
-            onChange={(event) => setSavingAnywayFor(event.currentTarget.checked ? probeInputs : null)}
+            onChange={(event) =>
+              setSavingAnywayFor(event.currentTarget.checked ? probeInputs : null)
+            }
           />
         )}
 
@@ -455,8 +475,8 @@ export function DatabaseServerForm({
             {isEdit
               ? "This changes how the service connects to the server. Run a probe that passes before saving."
               : "Run a probe that passes before registering."}{" "}
-            It checks the service can reach this server and administer it, which every migration onto
-            it will need.
+            It checks the service can reach this server and administer it, which every
+            migration onto it will need.
           </Text>
         )}
 

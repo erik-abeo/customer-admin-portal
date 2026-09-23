@@ -33,9 +33,9 @@ describe("canRollBackMove", () => {
   it("offers rollback only for a cut-over move whose source is recorded and still there", () => {
     expect(canRollBackMove(move({}))).toBe(true);
     expect(canRollBackMove(move({ SourceDatabaseName: null }))).toBe(false);
-    expect(canRollBackMove(move({ SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" }))).toBe(
-      false,
-    );
+    expect(
+      canRollBackMove(move({ SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" })),
+    ).toBe(false);
     expect(canRollBackMove(move({ Status: "settled" }))).toBe(false);
   });
 });
@@ -65,7 +65,35 @@ describe("canDropMoveSource", () => {
 
 describe("whyDatabaseNotMovable", () => {
   it("allows an active database with nothing unsettled", () => {
-    expect(whyDatabaseNotMovable(database, [move({ Status: "settled" })])).toBeNull();
+    // Settled with its source dropped, and moves that ended without cutting over.
+    expect(
+      whyDatabaseNotMovable(database, [
+        move({ Status: "settled", SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" }),
+        move({ Status: "cancelled" }),
+        move({ Status: "failed" }),
+        move({ Status: "rolled_back" }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("refuses one with a move still in progress, as the service does", () => {
+    for (const status of ["planned", "draining", "copying", "verifying"]) {
+      expect(whyDatabaseNotMovable(database, [move({ Status: status })])).toBe(
+        "a move of it is already in progress",
+      );
+    }
+  });
+
+  it("refuses one whose move settled but never finished dropping its source", () => {
+    expect(whyDatabaseNotMovable(database, [move({ Status: "settled" })])).toBe(
+      "a move's source drop has not finished",
+    );
+  });
+
+  it("ignores another database's moves", () => {
+    expect(
+      whyDatabaseNotMovable(database, [move({ DatabaseId: 999, Status: "planned" })]),
+    ).toBeNull();
   });
 
   it("refuses one whose earlier move has cut over and not been settled", () => {

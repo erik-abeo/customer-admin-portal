@@ -27,6 +27,12 @@ interface PrivilegesEditorProps {
   databases: DatabaseInfoItem[];
   value: DatabaseServerPrivilegeInfo[];
   onChange: (next: DatabaseServerPrivilegeInfo[]) => void;
+  /**
+   * On edit the set of servers is fixed. The update endpoint only changes a user
+   * on servers it already exists on: a server added here would update no rows,
+   * and one removed would keep its grants, while the page reported success.
+   */
+  lockServers?: boolean;
 }
 
 const PRIV_FIELDS: ReadonlyArray<{
@@ -48,6 +54,7 @@ export function PrivilegesEditor({
   databases,
   value,
   onChange,
+  lockServers = false,
 }: PrivilegesEditorProps) {
   const dbsByServer = useMemo(() => {
     const map = new Map<number, DatabaseInfoItem[]>();
@@ -133,14 +140,16 @@ export function PrivilegesEditor({
               <Title order={3} fz="sm" fw={600}>
                 {server?.Name ?? `Server #${entry.ServerId}`}
               </Title>
-              <ActionIcon
-                variant="subtle"
-                color="red"
-                onClick={() => removeServer(entry.ServerId)}
-                aria-label="Remove server"
-              >
-                <IconTrash size={16} />
-              </ActionIcon>
+              {!lockServers && (
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  onClick={() => removeServer(entry.ServerId)}
+                  aria-label={`Remove server ${server?.Name ?? entry.ServerId}`}
+                >
+                  <IconTrash size={16} />
+                </ActionIcon>
+              )}
             </Group>
 
             {allDbs.length === 0 ? (
@@ -192,6 +201,7 @@ export function PrivilegesEditor({
                               {PRIV_FIELDS.map((p) => (
                                 <Table.Td key={p.key} ta="center">
                                   <Checkbox
+                                    aria-label={`${p.label} on ${db?.DatabaseName ?? `database ${d.DatabaseId}`}`}
                                     checked={d.Privileges[p.key]}
                                     onChange={(e) =>
                                       togglePrivilege(
@@ -217,7 +227,7 @@ export function PrivilegesEditor({
         );
       })}
 
-      {availableServers.length > 0 && (
+      {!lockServers && availableServers.length > 0 && (
         <Group gap="xs" align="flex-end">
           <Select
             label="Add server"

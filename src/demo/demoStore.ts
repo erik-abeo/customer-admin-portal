@@ -34,6 +34,7 @@ import {
   seedEventLog,
   seedMigrationProgress,
   seedMigrationSessions,
+  seedServerStatuses,
   seedServers,
   seedStaticUserPrivileges,
   seedStaticUsers,
@@ -61,6 +62,7 @@ function makeIdSequence(start: number): IdSequence {
 
 class DemoStore {
   servers: DatabaseServerInfoItem[] = clone(seedServers);
+  serverStatuses: Record<number, string> = clone(seedServerStatuses);
   databases: DatabaseInfoItem[] = clone(seedDatabases);
   authorizedUsers: AuthorizedUserInfoItem[] = clone(seedAuthorizedUsers);
   staticUsers: GetStaticDatabaseUserResponse[] = clone(seedStaticUsers);
@@ -79,13 +81,18 @@ class DemoStore {
   // ID sequences seeded above the highest fixture id so freshly-created
   // records never collide with the seed.
   serverIds: IdSequence = makeIdSequence(100);
-  databaseIds: IdSequence = makeIdSequence(200);
+  databaseIds: IdSequence = makeIdSequence(202);
   authorizedUserIds: IdSequence = makeIdSequence(2000);
   staticUserIds: IdSequence = makeIdSequence(100);
   eventLogIds: IdSequence = makeIdSequence(10_000);
   migrationSessionIds: IdSequence = makeIdSequence(600);
   customerMoveIds: IdSequence = makeIdSequence(700);
   progressIds: IdSequence = makeIdSequence(20_000);
+
+  /** A server's recorded status; one created during the demo is `available`. */
+  serverStatus(id: number): string {
+    return this.serverStatuses[id] ?? "available";
+  }
 
   /** Add a synthetic event-log entry whenever the demo performs a write. */
   recordAdminEvent(message: string, details: string | null = null): void {
