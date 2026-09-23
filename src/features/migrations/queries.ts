@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 import { migrationsApi } from "@/api/migrations";
 import type { CreateMigrationSessionRequest } from "@/api/types";
+import { useRefreshOnStatusChange } from "@/lib/statusChanges";
 
 const KEYS = {
   all: ["migration-sessions"] as const,
@@ -22,8 +24,15 @@ const ACTIVE_POLL_MS = 5_000;
 const isActive = (status: string | null | undefined) =>
   status === "pending" || status === "redeemed" || status === "streaming";
 
+/**
+ * What a session's status changes. Redeeming a key for a new database registers
+ * it, and a discard or a failure can change what a server holds, so the
+ * database list and the capacity view are refetched on every status change.
+ */
+const CHANGED_BY_A_SESSION = [["databases"], ["server-capacity"]] as const;
+
 export function useMigrationSessions() {
-  return useQuery({
+  const query = useQuery({
     queryKey: KEYS.all,
     queryFn: () => migrationsApi.list(),
     // Poll only while at least one session could still change. A list of
@@ -32,16 +41,23 @@ export function useMigrationSessions() {
     refetchInterval: (query) =>
       (query.state.data ?? []).some((s) => isActive(s.Status)) ? ACTIVE_POLL_MS : false,
   });
+  useRefreshOnStatusChange(query.data, CHANGED_BY_A_SESSION);
+  return query;
 }
 
 export function useMigrationSession(id: number | undefined) {
-  return useQuery({
+  const query = useQuery({
     queryKey: id ? KEYS.detail(id) : ["migration-sessions", "disabled"],
     queryFn: () => migrationsApi.get(id as number),
     enabled: id !== undefined,
     refetchInterval: (query) =>
       isActive(query.state.data?.Session?.Status) ? ACTIVE_POLL_MS : false,
   });
+  // Structurally shared, so the session keeps its identity until it changes.
+  const session = query.data?.Session;
+  const asList = useMemo(() => (session ? [session] : undefined), [session]);
+  useRefreshOnStatusChange(asList, CHANGED_BY_A_SESSION);
+  return query;
 }
 
 export function useCreateMigrationSession() {
@@ -49,6 +65,10 @@ export function useCreateMigrationSession() {
   return useMutation({
     mutationFn: (request: CreateMigrationSessionRequest) =>
       migrationsApi.create(request),
+    // The result holds the key in plain text. With no cache time it leaves the
+    // MutationCache as soon as the page resets the mutation, rather than
+    // lingering for the default five minutes.
+    gcTime: 0,
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
   });
 }
@@ -72,8 +92,9 @@ export function useDiscardMigrationTarget() {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(id) });
       // The database registry changed too: discarding drops the registration
-      // along with the schema.
+      // along with the schema, and the server holds one fewer customer.
       qc.invalidateQueries({ queryKey: ["databases"] });
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }

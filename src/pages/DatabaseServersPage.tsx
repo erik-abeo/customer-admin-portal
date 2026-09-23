@@ -341,9 +341,17 @@ export function DatabaseServersPage() {
             submitting={update.isPending}
             onSubmit={async (payload) => {
               try {
-                await update.mutateAsync(
+                const result = await update.mutateAsync(
                   payload as Parameters<typeof update.mutateAsync>[0],
                 );
+                // A refused update is a 200 with Success false, not a throw.
+                if (!result.Success) {
+                  notifyError(
+                    new Error(result.Message ?? "The server was not updated."),
+                    "Failed to update server",
+                  );
+                  return;
+                }
                 notifySuccess("Server updated");
                 setEditTarget(null);
               } catch (e) {

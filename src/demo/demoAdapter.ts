@@ -60,6 +60,7 @@ import type {
 } from "@/api/types";
 
 import { demoStore } from "./demoStore";
+import { advanceMoves, advanceSessions, restoreSource } from "./simulation";
 
 const FAKE_LATENCY_MIN_MS = 80;
 const FAKE_LATENCY_MAX_MS = 220;
@@ -217,18 +218,21 @@ const ROUTES: Route[] = [
   {
     method: "GET",
     pattern: /^\/get-customer-moves$/,
-    handle: () =>
-      ok<GetCustomerMovesResponse>({
+    handle: () => {
+      advanceMoves(demoStore, Date.now());
+      return ok<GetCustomerMovesResponse>({
         Success: true,
         Message: null,
         Moves: demoStore.customerMoves,
-      }),
+      });
+    },
   },
   {
     method: "GET",
     pattern: /^\/get-customer-move\/(\d+)$/,
     paramNames: ["id"],
     handle: ({ params }) => {
+      advanceMoves(demoStore, Date.now());
       const id = Number(params.id);
       const move = demoStore.customerMoves.find((m) => m.Id === id);
       if (!move) return notFound(`Move ${id} not found`);
@@ -365,6 +369,7 @@ const ROUTES: Route[] = [
         });
       }
       move.Status = "rolled_back";
+      restoreSource(demoStore, move);
       move.PhaseDetail =
         "Pointed back at the source. The target copy is left in place.";
       return ok({
@@ -480,18 +485,21 @@ const ROUTES: Route[] = [
   {
     method: "GET",
     pattern: /^\/get-migration-sessions$/,
-    handle: () =>
-      ok<GetMigrationSessionsResponse>({
+    handle: () => {
+      advanceSessions(demoStore, Date.now());
+      return ok<GetMigrationSessionsResponse>({
         Success: true,
         Message: null,
         Sessions: demoStore.migrationSessions,
-      }),
+      });
+    },
   },
   {
     method: "GET",
     pattern: /^\/get-migration-session\/(\d+)$/,
     paramNames: ["id"],
     handle: ({ params }) => {
+      advanceSessions(demoStore, Date.now());
       const id = Number(params.id);
       const session = demoStore.migrationSessions.find((m) => m.Id === id);
       if (!session) return notFound(`Migration session ${id} not found`);
@@ -591,8 +599,10 @@ const ROUTES: Route[] = [
         });
       }
       if (!session.DatabaseCreated) {
+        // Success, as the service answers: there is nothing of this
+        // migration's to drop, which is what the operator wanted to be true.
         return ok({
-          Success: false,
+          Success: true,
           Message: session.ProvisionDatabaseName
             ? "Nothing to discard: the key was never redeemed, so no database was created."
             : "Nothing to discard: this migration targeted a database that already existed, which is not this migration's to drop.",
@@ -762,12 +772,15 @@ const ROUTES: Route[] = [
   {
     method: "GET",
     pattern: /^\/get-all-database-info$/,
-    handle: () =>
-      ok({
+    handle: () => {
+      // A move that cut over since the last read has repointed a database.
+      advanceMoves(demoStore, Date.now());
+      return ok({
         Success: true,
         Message: null,
         DatabaseInfoList: demoStore.databases,
-      }),
+      });
+    },
   },
   {
     method: "GET",
@@ -1229,7 +1242,15 @@ function buildResponse(
     }
   }
   return {
-    data: result.data,
+    // A copy, as the wire would give. The store is mutated in place by writes
+    // and the simulation, and handing out the same objects would let React
+    // Query see an old response as equal to a new one and skip the update.
+    data:
+      typeof result.data === "object" &&
+      result.data !== null &&
+      !(result.data instanceof Blob)
+        ? JSON.parse(JSON.stringify(result.data))
+        : result.data,
     status,
     statusText: status >= 200 && status < 300 ? "OK" : "Error",
     headers,

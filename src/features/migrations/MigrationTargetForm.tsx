@@ -24,7 +24,6 @@ import type {
   DatabaseServerInfoItem,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
-import { whyDatabaseUnavailable } from "@/features/databases/status";
 import {
   DEFAULT_EXPIRY_MINUTES,
   describeTarget,
@@ -34,6 +33,7 @@ import {
   visibleDatabases as visibleDatabasesFor,
   type MigrationTargetSelection,
   type TargetMode,
+  whyDatabaseNotSelectable,
 } from "@/features/migrations/migrationTarget";
 import { composeValidators, maxLength, required } from "@/lib/validators";
 
@@ -75,8 +75,17 @@ export function MigrationTargetForm({
     validateInputOnBlur: true,
     validate: {
       DatabaseServerId: required("Database server"),
-      DatabaseId: (value, values) =>
-        values.Mode === "existing" && !value ? "Select the target database" : null,
+      DatabaseId: (value, values) => {
+        if (values.Mode !== "existing") return null;
+        if (!value) return "Select the target database";
+        // Also caught in the option list, but the customer id can be changed
+        // after a database was picked.
+        const chosen = databases.find((d) => String(d.Id) === value);
+        const reason = chosen
+          ? whyDatabaseNotSelectable(chosen, values.CrystalPmId)
+          : null;
+        return reason ? `That database cannot be used: ${reason}.` : null;
+      },
       DatabaseName: (value, values) => {
         if (values.Mode !== "provision") return null;
         const trimmed = value.trim();
@@ -168,6 +177,7 @@ export function MigrationTargetForm({
 
           <SegmentedControl
             fullWidth
+            aria-label="Create a new database or use an existing one"
             value={form.values.Mode}
             onChange={(value) => form.setFieldValue("Mode", value as TargetMode)}
             data={[
@@ -184,12 +194,15 @@ export function MigrationTargetForm({
               searchable
               disabled={!selectedServerId}
               leftSection={<IconDatabase size={14} />}
-              description="Only an active database can be migrated into."
+              description="Only an active database belonging to this customer can be migrated into."
               data={visibleDatabases.map((d) => {
                 // Offered but disabled, with the reason, rather than hidden: a
                 // customer's database vanishing from the list would look like it
                 // did not exist. The service refuses these too.
-                const unavailable = whyDatabaseUnavailable(d.Status);
+                const unavailable = whyDatabaseNotSelectable(
+                  d,
+                  form.values.CrystalPmId,
+                );
                 return {
                   value: String(d.Id),
                   label: `${d.DatabaseName}${d.CrystalPmId ? ` (CPM #${d.CrystalPmId})` : ""}${

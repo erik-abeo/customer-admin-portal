@@ -36,7 +36,12 @@ import type {
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
 import { useProbeDatabaseServer } from "@/features/databaseServers/queries";
-import { canRegisterServer } from "./registration";
+import {
+  canSubmitServer,
+  connectionChanged,
+  effectiveConnection,
+  probeSslMode,
+} from "./registration";
 import {
   composeValidators,
   hostname,
@@ -131,38 +136,35 @@ export function DatabaseServerForm({
     result: ProbeDatabaseServerResponse;
   } | null>(null);
 
-  // A result describes the address, login and certificate it was run with. Once
-  // any of those changes it describes a different server, so it stops showing
-  // rather than vouching for something nobody has checked.
-  const probeInputs = JSON.stringify([
-    form.values.LocalServerAddress.trim(),
-    String(form.values.ServerPort),
-    form.values.AdminUserName.trim(),
-    form.values.RootUserPassword,
-    form.values.Certificate.trim(),
-  ]);
+  // What saving would connect with: on edit, blank password and certificate
+  // fields keep the stored ones. A result describes exactly the connection it was
+  // run with. Once any part of that changes it describes a different server, so it
+  // stops showing rather than vouching for something nobody has checked.
+  const connection = effectiveConnection(form.values, initial);
+  const probeInputs = JSON.stringify(connection);
   const probeResult = probed?.for === probeInputs ? probed.result : null;
-  const canSubmit = canRegisterServer(isEdit, probeResult);
+  const changesConnection = initial ? connectionChanged(form.values, initial) : true;
+  const canSubmit = canSubmitServer(isEdit, changesConnection, probeResult);
 
-  // The probe needs somewhere to connect and something to connect as. Without a
-  // password there is nothing to test, and in edit mode the stored one is never
-  // sent back to the browser, so the operator has to retype it to run a check.
+  // The probe needs somewhere to connect and something to connect as. On edit
+  // the stored password is used when the field is left blank.
   const canProbe =
-    form.values.LocalServerAddress.trim().length > 0 &&
-    form.values.AdminUserName.trim().length > 0 &&
-    form.values.RootUserPassword.length > 0;
+    connection.Host.length > 0 && connection.User.length > 0 && connection.Password.length > 0;
 
   const runProbe = async () => {
     setProbed(null);
     const inputs = probeInputs;
     try {
       const result = await probe.mutateAsync({
-        Host: form.values.LocalServerAddress.trim(),
-        Port: String(form.values.ServerPort),
-        User: form.values.AdminUserName.trim(),
-        Password: form.values.RootUserPassword,
-        SslMode: "Required",
-        CertificatePem: form.values.Certificate.trim() || null,
+        Host: connection.Host,
+        Port: connection.Port,
+        User: connection.User,
+        Password: connection.Password,
+        // VerifyCA whenever there is a certificate, because that is what the
+        // installer is handed at redemption: the probe then proves the
+        // certificate being registered, not only that TLS negotiates.
+        SslMode: probeSslMode(connection),
+        CertificatePem: connection.CertificatePem || null,
       });
       setProbed({ for: inputs, result });
     } catch {
@@ -192,7 +194,6 @@ export function DatabaseServerForm({
       RemoteServerAddress: values.RemoteServerAddress.trim() || null,
       ServerPort: values.ServerPort,
       AdminUserName: values.AdminUserName.trim(),
-      SecurityGroupId: values.SecurityGroupId.trim() || null,
     };
     if (initial) {
       const payload: UpdateDatabaseServerInfoRequest = {
@@ -200,6 +201,9 @@ export function DatabaseServerForm({
         ...base,
         // Blank on edit sends null, which the service reads as "keep the stored one".
         Certificate: values.Certificate.trim() || null,
+        // The service clears the group on an empty string and ignores null, so a
+        // cleared field is sent as "" to actually remove it.
+        SecurityGroupId: values.SecurityGroupId.trim(),
         RootUserPassword:
           values.RootUserPassword.length > 0
             ? values.RootUserPassword
@@ -211,6 +215,7 @@ export function DatabaseServerForm({
         ...base,
         // Required on create, and the validator above has already refused a blank one.
         Certificate: values.Certificate.trim(),
+        SecurityGroupId: values.SecurityGroupId.trim() || null,
         RootUserPassword: values.RootUserPassword,
       };
       await onSubmit(payload);
@@ -435,8 +440,11 @@ export function DatabaseServerForm({
 
         {!canSubmit && (
           <Text size="xs" c="dimmed" ta="right" id="server-register-hint">
-            Run a probe that passes before registering. It checks the service can reach this server and
-            administer it, which every migration onto it will need.
+            {isEdit
+              ? "This changes how the service connects to the server. Run a probe that passes before saving."
+              : "Run a probe that passes before registering."}{" "}
+            It checks the service can reach this server and administer it, which every migration onto
+            it will need.
           </Text>
         )}
 

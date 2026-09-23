@@ -76,7 +76,9 @@ the UI can run it on demand while an operator is still editing the form.
 The system supports both MySQL and MariaDB on AWS RDS and **detects which one a
 server is rather than being told**, so there is no engine field for the operator
 to fill in and no engine dropdown to build. Engine identity comes from the
-server itself; the version banner is only used for the version number.
+server itself: it is MariaDB when the Aria storage engine is present **or** the
+version banner names MariaDB, and MySQL otherwise. The version number is parsed
+from the banner, with MariaDB's `5.5.5-` compatibility prefix stripped first.
 
 ```jsonc
 // ProbeDatabaseServerRequest
@@ -128,12 +130,33 @@ it failed rather than only that it was rejected.
 
 The portal will not submit a new server until a probe of exactly the address,
 port, login, password and certificate being registered has returned
-`IsSupported: true`. Changing any of them clears the result. The service does
-not probe again on create, so this is the portal's rule rather than the API's.
-Edits are not gated, because the stored password never comes back to the
-browser.
+`IsSupported: true`. Changing any of them clears the result. An edit is held to
+the same rule whenever it changes any of those five from what is stored; an edit
+that changes only the name, description or security group is not gated. The
+service does not probe again on create or update, so this is the portal's rule
+rather than the API's.
+
+On edit, a blank password or certificate field means "keep the stored one", and
+the probe uses the stored value in its place. That works because
+`get-database-server-info/{id}` and `get-all-database-server-info` return the
+**decrypted** `RootUserPassword` and `Certificate`, which predates this branch.
+The portal relies on it for edits and probes, never displays the password, and
+clears its query cache on sign-out so the value does not outlive the session.
+
+The probe is sent with `SslMode` `VerifyCA` whenever a certificate is present,
+since that is what the installer is handed at redemption, and `Required`
+otherwise. The service honours both, writing the certificate to a temporary CA
+file for the length of the probe.
 
 ### 1.2 Database servers carry an admin login, which is not always `root`
+
+On update, the service skips any string field that is null, empty or
+whitespace, so those fields cannot be cleared through the API: `Name`,
+`Description`, `LocalServerAddress`, `RemoteServerAddress`, `RootUserPassword`,
+`Certificate` and `AdminUserName`. `SecurityGroupId` is the exception: null
+leaves it alone and an empty string clears it, so the portal sends `""` when the
+field is emptied. `UpdateDatabaseServerInfoResponse.Success` can be false on a
+200, and the portal checks it before reporting success.
 
 `database_server_info` records an **`AdminUserName`** per server, and it appears
 on `CreateDatabaseServerInfoRequest`, `UpdateDatabaseServerInfoRequest`,
@@ -170,9 +193,9 @@ silently creating a user who cannot reach their database.
 ### 1.4 Databases carry a status
 
 `DatabaseInfoItem` has a **`Status`**: `active`, `moving`, `suspended` or
-`retired`. It is returned by `get-all-database-info`, the by-server and
-by-CrystalPM-id lists, and `get-database-info`, and is set by the service rather
-than by the create and update requests. `moving` is set while a customer move
+`retired`. It is returned by `get-all-database-info` and
+`get-database-info/{id}`, and is set by the service rather than by
+`create-database-info` or `update-database-info`. `moving` is set while a customer move
 holds the database, `suspended` by an operator, and `retired` by hand once a
 database is out of service.
 
@@ -180,6 +203,9 @@ Only an `active` database can be migrated into or moved. The service refuses the
 rest, with a `Message` naming the status. The UI shows the status wherever a
 database is listed, and offers the others in the migration and move pickers
 disabled, with the reason, so an operator sees why before submitting. The
+migration picker also disables a database belonging to a customer other than
+the one entered, and the move picker one whose earlier move has cut over and
+not been settled or rolled back. The
 refusal stays the backstop for a status that changed after the list was loaded.
 
 ### 1.5 Server capacity and placement
@@ -280,9 +306,10 @@ anything cuts over, and the customer is put back on the source.
 **Moves between engines are refused.** MySQL to MariaDB, or the reverse, is a
 schema conversion, which is what a migration key and the installer are for. The
 executor checks both servers before it quiesces anyone and fails the move with
-the customer still online, so in practice every move is verified by checksum.
-`row_count` remains in the vocabulary only for a server replaced under a move
-already in flight.
+the customer still online. `row_count` is still recorded in two cases: for any
+table whose row counts already differ, since checksums are skipped then and the
+table fails on the count, and between different engines, which is only reachable
+if a server is replaced under a move already in flight.
 
 `create-customer-move` answers 400 with a `Message` for:
 
@@ -386,11 +413,13 @@ to copy it: no close button, no Escape, no click outside. Losing it means
 minting another and revoking this one. Record the signed-in operator as
 `CreatedByAdmin`.
 
-**`TargetSummary` is the confirmation text.** It names the customer and
+**`TargetSummary` describes what was minted.** It names the customer and
 destination, and appends a warning when that customer already has a database on
 a different server — legal, since `crystalpm_id` is unique per server rather
 than globally, and also exactly what a customer being split across two servers
-looks like. Show it in the confirm step, not after.
+looks like. It only comes back from `create-migration-session`, so it can only
+be shown after minting, alongside the key. The confirm step before minting
+states the destination from the portal's own selection instead.
 
 **Statuses**: `pending` → `redeemed` → `streaming` → `completed` | `failed`,
 plus `expired` and `revoked`. `get-migration-sessions` sweeps expiries before
@@ -416,9 +445,12 @@ failed migration leaves its destination exactly as it was, half imported, on
 purpose: dropping it automatically would destroy the evidence of what went wrong
 at the moment somebody most needs it.
 
-The backend refuses unless the session finished unsuccessfully **and** created
-that database itself. A migration aimed at a database that already existed can
-never drop it. The UI should only surface the action when `DatabaseCreated` is
+Only a session that finished unsuccessfully can discard: any other status
+answers `Success: false`. A session that did not create its database, because it
+was minted against an existing one or its key was never redeemed, answers 200
+with `Success: true` and "Nothing to discard", since nothing of this
+migration's exists to drop; so does a second discard of one already dropped. A
+migration aimed at a database that already existed can never drop it. The UI should only surface the action when `DatabaseCreated` is
 true, `DatabaseId` is not null and the status is `failed`, `revoked` or
 `expired`, so the destructive button is absent rather than present-and-refused.
 
@@ -439,7 +471,9 @@ usable is refused with 409 and a `Message` saying what is in the way: a schema o
 that name appeared on the server after minting, or the existing database it was
 minted against has since moved, changed owner, stopped being `active` or started
 a move. The key stays `pending` and redeems normally once the conflict is
-cleared. Every other refusal is 401 with one deliberately uninformative message.
+cleared. A `ClientPublicIpAddress` that is not exactly one IPv4 or IPv6 address
+is a 400 saying so, and an unexpected failure is a 500. Every other refusal is
+401 with one deliberately uninformative message.
 
 **Redemption returns the server's CA.** When the server was registered with a
 certificate, the credentials carry it as `CertificatePem` with `SslMode`
@@ -453,16 +487,26 @@ user it held. The installer sends a keep-alive every minute, so a long step
 still counts as alive; only a machine that has genuinely gone away goes quiet.
 A session may therefore move to `failed` without the portal doing anything.
 
-The UI's behavior on common error codes:
+The UI's behavior on errors. Every failed request becomes an `ApiError` whose
+message is the body's `Message` when present (`src/api/httpClient.ts`). A failed
+page load renders it through `QueryStatus` with a title chosen by status and the
+message as detail; a failed action shows a red notification from `notifyError`
+with the message and `(status N)`. Queries are not retried on 4xx.
+`Retry-After` is not read.
 
-| Status | UI behavior                                                                                 |
-| ------ | ------------------------------------------------------------------------------------------- |
-| 401    | Global handler clears credentials and routes the user back to `/login`.                     |
-| 403    | Notification: "Forbidden — your account does not have access".                              |
-| 404    | Page-level empty state where applicable; otherwise a contextual error toast.                |
-| 400    | Notification with the body's `Message` when present (refused mints and moves say why).      |
-| 409    | Notification with the body's `Message` when present.                                        |
-| 5xx    | Notification: "Service error — please try again", with `Retry-After` honored where present. |
+| Status | Failed page load (`QueryStatus`)                          | Failed action (`notifyError`)  |
+| ------ | --------------------------------------------------------- | ------------------------------ |
+| 0      | "Cannot reach the API", with retry                        | message                        |
+| 401    | Every 401 signs the operator out, clears the query cache and returns to `/login` | same |
+| 403    | "You don't have access to this"                           | message (status 403)           |
+| 404    | "Not found", with retry                                   | message (status 404)           |
+| 400, 422 | "Validation failed"                                     | message (status 400)           |
+| 409    | "This record changed somewhere else"                      | message (status 409)           |
+| 429    | "Too many requests"                                       | message (status 429)           |
+| 5xx    | "The server hit a problem", with retry                    | message (status 5xx)           |
+
+A refusal the service answers as 200 with `Success: false` is not an error to
+the client; each action checks `Success` and shows the `Message` itself.
 
 ---
 
@@ -475,12 +519,16 @@ without changing names / DTOs is enough to ship the corresponding UI.
 
 | Method | URL                                    | Notes                                                                                                                                                         | Response                           |
 | ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| DELETE | `/My/delete-database-server/{id}`      | Reject (HTTP 409) when any database still references the server. Body should describe the dependency.                                                         | `{ Success: bool, Message: str? }` |
-| DELETE | `/My/delete-database/{id}`             | Reject (409) when any authorized user or static user is still mapped to the database.                                                                         | `{ Success: bool, Message: str? }` |
+| DELETE | `/My/delete-database-server-info/{id}` | Reject (HTTP 409) when any database still references the server. Body should describe the dependency.                                                         | `{ Success: bool, Message: str? }` |
+| DELETE | `/My/delete-database-info/{id}`        | Reject (409) when any authorized user or static user is still mapped to the database.                                                                         | `{ Success: bool, Message: str? }` |
 | DELETE | `/My/delete-static-database-user/{id}` | The SPA sends one DELETE per `(server, user)` row; backend may treat each as independent. Optionally also accept `?cascade=true` to drop all rows for a user. | `{ Success: bool, Message: str? }` |
 
-The SPA's `useDelete*` mutations live in `src/features/*/queries.ts` and
-already invalidate the relevant list queries on success.
+The service exposes none of these yet; the only DELETE it has is
+`delete-user/{userId}`. The URLs above are the ones the SPA calls, named after
+the existing `create-`, `update-` and `get-...-info` routes, so implement them at
+exactly these paths. The SPA's `useDelete*` mutations live in
+`src/features/*/queries.ts` and already invalidate the relevant list queries on
+success.
 
 ### 2.3 Event log (gated by `VITE_FEATURE_EVENT_LOG`)
 

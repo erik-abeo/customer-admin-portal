@@ -3,6 +3,7 @@ import type {
   DatabaseInfoItem,
   DatabaseServerInfoItem,
 } from "@/api/types";
+import { whyDatabaseUnavailable } from "@/features/databases/status";
 
 /**
  * Whether the migration streams into a database that already exists, or one
@@ -71,6 +72,32 @@ export const visibleDatabases = (
   databaseServerId
     ? databases.filter((d) => String(d.DatabaseServerId) === databaseServerId)
     : [];
+
+/**
+ * Why an existing database cannot be the target for this customer, or null when
+ * it can.
+ *
+ * Two reasons: it is not active, or it belongs to a different customer than the
+ * one entered. The second is the misroute this form exists to prevent, so it is
+ * stated in the option rather than left to the service's 400. Until a customer
+ * id is entered only status counts, and the form's own validation catches a
+ * mismatch made afterwards.
+ */
+export const whyDatabaseNotSelectable = (
+  database: DatabaseInfoItem,
+  crystalPmId: number | string,
+): string | null => {
+  const unavailable = whyDatabaseUnavailable(database.Status);
+  if (unavailable) return unavailable;
+  const customer = Number(crystalPmId);
+  if (
+    crystalPmId !== "" &&
+    Number.isInteger(customer) &&
+    database.CrystalPmId !== customer
+  )
+    return `belongs to customer ${database.CrystalPmId}`;
+  return null;
+};
 
 /**
  * States the destination in plain words for the confirmation step, before any

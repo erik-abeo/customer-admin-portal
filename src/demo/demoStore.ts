@@ -73,6 +73,8 @@ class DemoStore {
     clone(seedMigrationProgress);
   customerMoves: CustomerMove[] = [];
   customerMoveVerification: Record<number, CustomerMoveVerification[]> = {};
+  /** When each live demo stream finishes; see simulation.ts. */
+  demoStreamsEndAt: Record<number, number> = {};
 
   // ID sequences seeded above the highest fixture id so freshly-created
   // records never collide with the seed.
@@ -83,6 +85,7 @@ class DemoStore {
   eventLogIds: IdSequence = makeIdSequence(10_000);
   migrationSessionIds: IdSequence = makeIdSequence(600);
   customerMoveIds: IdSequence = makeIdSequence(700);
+  progressIds: IdSequence = makeIdSequence(20_000);
 
   /** Add a synthetic event-log entry whenever the demo performs a write. */
   recordAdminEvent(message: string, details: string | null = null): void {

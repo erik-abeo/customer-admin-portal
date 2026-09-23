@@ -1,8 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 
 import { movesApi } from "@/api/moves";
-import type { CreateCustomerMoveRequest, CustomerMove } from "@/api/types";
+import type {
+  CreateCustomerMoveRequest,
+  CustomerMove,
+  DatabaseInfoItem,
+} from "@/api/types";
+import { whyDatabaseUnavailable } from "@/features/databases/status";
+import { useRefreshOnStatusChange } from "@/lib/statusChanges";
 
 const KEYS = {
   all: ["customer-moves"] as const,
@@ -22,14 +28,29 @@ export const canCancelMove = (status: string | null | undefined): boolean =>
   CANCELLABLE.has(status ?? "");
 
 /**
- * Ids of moves that were active in `before` and are not in `after`: the ones
- * that just cut over, failed or were cancelled.
+ * Whether a move still has a retained source to roll back to or drop: cut over,
+ * source not yet dropped, and its name recorded. The service refuses both
+ * actions for a move with no recorded source name, so they are not offered.
  */
-export const movesThatSettled = (
-  before: ReadonlySet<number>,
-  after: ReadonlyArray<Pick<CustomerMove, "Id" | "Status">>,
-): number[] =>
-  after.filter((m) => before.has(m.Id) && !isActiveMove(m.Status)).map((m) => m.Id);
+export const hasRetainedSource = (move: CustomerMove): boolean =>
+  move.Status === "flipped" &&
+  !move.SourceDroppedDateTimeUtc &&
+  Boolean(move.SourceDatabaseName?.trim());
+
+/**
+ * Why a database cannot be moved now, or null when it can: it is not active, or
+ * an earlier move of it has cut over and not been settled or rolled back. After
+ * a flip the database is active again on the target, so status alone does not
+ * catch the second; the service refuses it for the same reason.
+ */
+export const whyDatabaseNotMovable = (
+  database: DatabaseInfoItem,
+  moves: ReadonlyArray<CustomerMove>,
+): string | null =>
+  whyDatabaseUnavailable(database.Status) ??
+  (moves.some((m) => m.DatabaseId === database.Id && m.Status === "flipped")
+    ? "a cut-over move has not been settled or rolled back"
+    : null);
 
 /**
  * Five seconds while something is moving.
@@ -41,28 +62,11 @@ export const movesThatSettled = (
 const ACTIVE_POLL_MS = 5_000;
 
 /**
- * Refreshes what a move changes once one stops moving.
- *
- * A move that cuts over repoints a database at another server, and one that
- * fails or is cancelled puts it back to active. Polling only watches the move,
- * so without this the database list and the capacity view would keep showing
- * the customer where they were until something else refetched them.
+ * What a move's status changes. Planning marks the database `moving`, cutting
+ * over repoints it at another server, and failing, cancelling or rolling back
+ * restores it, so every phase change is a reason to refetch these.
  */
-function useRefreshWhenMovesSettle(moves: ReadonlyArray<CustomerMove> | undefined) {
-  const qc = useQueryClient();
-  const active = useRef<Set<number>>(new Set());
-
-  useEffect(() => {
-    if (!moves) return;
-    if (movesThatSettled(active.current, moves).length > 0) {
-      qc.invalidateQueries({ queryKey: ["databases"] });
-      qc.invalidateQueries({ queryKey: ["server-capacity"] });
-    }
-    active.current = new Set(
-      moves.filter((m) => isActiveMove(m.Status)).map((m) => m.Id),
-    );
-  }, [moves, qc]);
-}
+const MOVED_BY_A_MOVE = [["databases"], ["server-capacity"]] as const;
 
 export function useCustomerMoves() {
   const query = useQuery({
@@ -73,7 +77,7 @@ export function useCustomerMoves() {
         ? ACTIVE_POLL_MS
         : false,
   });
-  useRefreshWhenMovesSettle(query.data);
+  useRefreshOnStatusChange(query.data, MOVED_BY_A_MOVE);
   return query;
 }
 
@@ -89,7 +93,7 @@ export function useCustomerMove(id: number | undefined) {
   // between polls until something in it changes.
   const move = query.data?.Move;
   const asList = useMemo(() => (move ? [move] : undefined), [move]);
-  useRefreshWhenMovesSettle(asList);
+  useRefreshOnStatusChange(asList, MOVED_BY_A_MOVE);
   return query;
 }
 

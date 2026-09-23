@@ -30,9 +30,11 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { useDatabases } from "@/features/databases/queries";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
-import { whyDatabaseUnavailable } from "@/features/databases/status";
+import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import {
   canCancelMove,
+  hasRetainedSource,
+  whyDatabaseNotMovable,
   useCancelCustomerMove,
   useCreateCustomerMove,
   useCustomerMove,
@@ -310,7 +312,7 @@ export function MovesPage() {
                 Cancel
               </Button>
             )}
-            {move.Status === "flipped" && !move.SourceDroppedDateTimeUtc && (
+            {hasRetainedSource(move) && (
               <>
                 <Button
                   size="compact-sm"
@@ -338,7 +340,14 @@ export function MovesPage() {
     </Table.Tr>
   ));
 
-  const canPlan = databaseId !== "" && targetServerId !== "";
+  // Checked here as well as by the service, so an unusable name is caught while
+  // the operator is still looking at it.
+  const targetNameError =
+    targetName.trim() && !isSafeDatabaseName(targetName)
+      ? "Use letters, digits and underscores, starting with a letter"
+      : null;
+  const canPlan =
+    databaseId !== "" && targetServerId !== "" && targetNameError === null;
 
   return (
     <Container size="xl" py="md">
@@ -405,11 +414,11 @@ export function MovesPage() {
             placeholder="Pick the database to move"
             required
             searchable
-            description="Only an active database can be moved."
+            description="Only an active database with no unsettled move can be moved."
             data={(databases.data ?? []).map((d) => {
               // Disabled with the reason rather than hidden, so a customer who is
               // mid-move or suspended is visibly so. The service refuses these too.
-              const unavailable = whyDatabaseUnavailable(d.Status);
+              const unavailable = whyDatabaseNotMovable(d, moves.data ?? []);
               return {
                 value: String(d.Id),
                 label: `${d.DatabaseName} (CPM #${d.CrystalPmId})${
@@ -442,6 +451,7 @@ export function MovesPage() {
             label="Name on the target"
             description="Leave blank to keep the current name. It must be unique on the target server."
             placeholder={selectedDatabase?.DatabaseName ?? ""}
+            error={targetNameError}
             value={targetName}
             onChange={(event) => setTargetName(event.currentTarget.value)}
           />
@@ -556,12 +566,14 @@ export function MovesPage() {
                                 <IconCheck
                                   size={14}
                                   color="var(--mantine-color-teal-6)"
+                                  role="img"
                                   aria-label="Matched"
                                 />
                               ) : (
                                 <IconX
                                   size={14}
                                   color="var(--mantine-color-red-6)"
+                                  role="img"
                                   aria-label="Did not match"
                                 />
                               )}

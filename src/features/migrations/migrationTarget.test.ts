@@ -21,6 +21,7 @@ import {
   selectServer,
   toCreateRequest,
   visibleDatabases,
+  whyDatabaseNotSelectable,
   type MigrationTargetSelection,
 } from "./migrationTarget";
 
@@ -186,4 +187,30 @@ describe("isSafeDatabaseName", () => {
       expect(isSafeDatabaseName(name)).toBe(false);
     },
   );
+});
+
+describe("whyDatabaseNotSelectable", () => {
+  const mine = database(10, 1, "easyopti_1042", 1042);
+
+  it("accepts an active database that belongs to the customer entered", () => {
+    expect(whyDatabaseNotSelectable(mine, 1042)).toBeNull();
+    expect(whyDatabaseNotSelectable(mine, "1042")).toBeNull();
+  });
+
+  it("refuses another customer's database and says whose it is", () => {
+    expect(whyDatabaseNotSelectable(mine, 887)).toBe("belongs to customer 1042");
+  });
+
+  it("refuses a database that is not active whoever it belongs to", () => {
+    expect(whyDatabaseNotSelectable({ ...mine, Status: "moving" }, 1042)).toBe(
+      "a customer move is in progress",
+    );
+  });
+
+  it("judges only status until a customer id is entered", () => {
+    expect(whyDatabaseNotSelectable(mine, "")).toBeNull();
+    expect(whyDatabaseNotSelectable({ ...mine, Status: "suspended" }, "")).toBe(
+      "suspended",
+    );
+  });
 });

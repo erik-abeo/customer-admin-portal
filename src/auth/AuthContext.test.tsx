@@ -1,4 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getAdminName, getAuthStrategy } from "@/api/httpClient";
@@ -6,6 +8,15 @@ import { AuthProvider } from "./AuthContext";
 import { useAuth } from "./authContextValue";
 
 const STORAGE_KEY = "cap.auth.v1";
+
+// AuthProvider reads the QueryClient from context, as it does inside App.
+let queryClient: QueryClient;
+const render = (ui: ReactElement) =>
+  rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
 
 function Probe() {
   const { adminName, isAuthenticated, signIn, signOut } = useAuth();
@@ -21,6 +32,26 @@ function Probe() {
 describe("AuthProvider", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    queryClient = new QueryClient();
+  });
+
+  it("signOut empties the query cache, so no secret survives into the next session", () => {
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    act(() => {
+      screen.getByText("in").click();
+    });
+    queryClient.setQueryData(["database-servers"], [{ RootUserPassword: "secret" }]);
+
+    act(() => {
+      screen.getByText("out").click();
+    });
+
+    expect(queryClient.getQueryData(["database-servers"])).toBeUndefined();
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
   });
 
   afterEach(() => {

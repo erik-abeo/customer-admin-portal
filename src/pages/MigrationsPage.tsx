@@ -477,6 +477,9 @@ export function MigrationsPage() {
                       {entry.RowsTotal ? (
                         <Progress
                           my={6}
+                          aria-label={`${entry.TableName ?? entry.Phase ?? "Progress"}: ${(
+                            entry.RowsDone ?? 0
+                          ).toLocaleString()} of ${entry.RowsTotal.toLocaleString()} rows`}
                           value={((entry.RowsDone ?? 0) / entry.RowsTotal) * 100}
                           size="sm"
                         />
