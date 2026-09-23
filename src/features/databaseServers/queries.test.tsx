@@ -10,7 +10,7 @@
  *  3. disabled state when `id` is undefined
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +20,7 @@ import {
   databaseServerKeys,
   useDatabaseServer,
   useDatabaseServerForEdit,
+  useCreateDatabaseServer,
   useDatabaseServers,
   useProbeDatabaseServer,
 } from "./queries";
@@ -256,5 +257,51 @@ describe("useDatabaseServerForEdit", () => {
       wrapper: makeWrapper(makeClient()),
     });
     expect(databaseServersApi.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("server mutations holding the admin password", () => {
+  const holds = (client: QueryClient, secret: string) =>
+    client
+      .getMutationCache()
+      .getAll()
+      .some((m) => JSON.stringify(m.state.variables ?? null).includes(secret));
+
+  it("drop a probe's password once the form using it unmounts", async () => {
+    vi.mocked(databaseServersApi.probe).mockResolvedValue(
+      {} as ProbeDatabaseServerResponse,
+    );
+    // Default gcTime, so it is the hook's own gcTime 0 that drops it.
+    const client = new QueryClient();
+    const { result, unmount } = renderHook(() => useProbeDatabaseServer(), {
+      wrapper: makeWrapper(client),
+    });
+    await act(() =>
+      result.current.mutateAsync({
+        Host: "h",
+        User: "u",
+        Password: "Probe-Pass-1",
+      } as never),
+    );
+    expect(holds(client, "Probe-Pass-1")).toBe(true);
+    unmount();
+    await waitFor(() => expect(holds(client, "Probe-Pass-1")).toBe(false));
+  });
+
+  it("drop a create's password once reset", async () => {
+    vi.mocked(databaseServersApi.create).mockResolvedValue({
+      Id: 1,
+      Message: null,
+    } as never);
+    const client = new QueryClient();
+    const { result } = renderHook(() => useCreateDatabaseServer(), {
+      wrapper: makeWrapper(client),
+    });
+    await act(() =>
+      result.current.mutateAsync({ RootUserPassword: "Create-Pass-2" } as never),
+    );
+    expect(holds(client, "Create-Pass-2")).toBe(true);
+    act(() => result.current.reset());
+    await waitFor(() => expect(holds(client, "Create-Pass-2")).toBe(false));
   });
 });

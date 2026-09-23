@@ -54,7 +54,7 @@ docker build \
 | `VITE_APP_NAME`              | `Customer Admin Portal` | Name shown in the header and page titles.                                                               |
 | `VITE_ENVIRONMENT`           | empty (`development`)   | Environment label sent to Sentry.                                                                       |
 | `VITE_DEMO_MODE`             | `false`                 | Serves in-memory fixtures instead of calling the API. Never for a real deployment.                      |
-| `VITE_FEATURE_MIGRATIONS`    | `false`                 | Shows the Migrations page, which mints streaming-migration keys.                                        |
+| `VITE_FEATURE_MIGRATIONS`    | `false`                 | Registers the Migrations, Capacity and Customer moves pages. Needs the API's migrations 001 to 011.     |
 | `VITE_FEATURE_EVENT_LOG`     | `false`                 | Shows the Event Log viewer. Needs the pending event-log endpoints.                                      |
 | `VITE_FEATURE_DELETES`       | `false`                 | Shows delete actions. Needs the pending delete endpoints.                                               |
 | `VITE_FEATURE_RBAC`          | `false`                 | Gates write actions on the `X-Admin-Role` response header. Off means everyone is an admin.              |

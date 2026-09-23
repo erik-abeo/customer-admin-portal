@@ -20,6 +20,7 @@ import {
   type ResponseEvent,
 } from "./httpClient";
 import { getCurrentRole, setCurrentRole } from "@/auth/roles";
+import { features } from "@/config/env";
 
 type Adapter = (config: InternalAxiosRequestConfig) => Promise<AxiosResponse>;
 
@@ -145,20 +146,21 @@ describe("httpClient response listener", () => {
       ok(config, {}, { "x-admin-role": "viewer" }),
     );
 
-    // Force RBAC on so the role store doesn't auto-default to admin.
-    // (features.rbac is read at module load; since it defaults to false in
-    // the test env, getCurrentRole would normally return "admin". We don't
-    // toggle it here — instead we assert that setCurrentRole was *called*
-    // by inspecting the store's internal state through the public API.)
-    setCurrentRole(null);
-    await httpClient.get("/anything");
-
-    // When RBAC is off, the resolved role is always "admin". We can still
-    // verify the capture path fired by setting the role to "admin" first
-    // and then issuing a response with "viewer" — getCurrentRole should
-    // continue to be admin (because RBAC is off), but if we toggle the
-    // store to RBAC-enabled in a separate test, we'd see "viewer".
-    expect(getCurrentRole()).toBe("admin");
+    // With RBAC off every caller resolves to admin, which would pass whether
+    // or not the header was captured. On, the only way to read "viewer" is
+    // for the response header to have reached the role store.
+    const rbac = features as { rbac: boolean };
+    const wasOn = rbac.rbac;
+    rbac.rbac = true;
+    try {
+      setCurrentRole("admin");
+      expect(getCurrentRole()).toBe("admin");
+      await httpClient.get("/anything");
+      expect(getCurrentRole()).toBe("viewer");
+    } finally {
+      rbac.rbac = wasOn;
+      setCurrentRole(null);
+    }
   });
 
   it("listener exceptions don't break subsequent listeners or the request", async () => {

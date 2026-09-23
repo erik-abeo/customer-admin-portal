@@ -330,3 +330,131 @@ describe("demo server registration", () => {
     expect(stored?.SecurityGroupId).toBeNull();
   });
 });
+
+describe("demo static user updates, as the service applies them", () => {
+  const privs = (id: number) =>
+    (demoStore.staticUserPrivileges[id] ?? []).map((p) => p.DatabaseId);
+
+  it("revokes per server: a server's grid replaces what the user held there", async () => {
+    // static_initech_replica is row 2 on server 1 (102) and row 3 on server 2 (103).
+    const before = structuredClone(demoStore.staticUserPrivileges);
+    const kept = demoStore.staticUserPrivileges[2]![0]!;
+    try {
+      const res = await call("put", "/update-static-database-user", {
+        Id: 2,
+        UserName: "static_initech_replica",
+        GenerateNewPassword: false,
+        NewDescription: null,
+        Servers: [
+          { ServerId: 1, Databases: [kept] },
+          { ServerId: 2, Databases: [] },
+        ],
+      });
+      expect((res.data as UpdateStaticDatabaseUserResponse).Message).toBe("Success");
+      expect(privs(2)).toEqual([102]);
+      // Edited through row 2, and still revoked on the other server.
+      expect(privs(3)).toEqual([]);
+    } finally {
+      demoStore.staticUserPrivileges = before;
+    }
+  });
+
+  it("refuses a database that is not active, in the service's words, and keeps the old grant", async () => {
+    // static_wayne_reports (4) holds 104 and tenant_stark (105), which is suspended.
+    const before = structuredClone(demoStore.staticUserPrivileges);
+    try {
+      const held = demoStore.staticUserPrivileges[4]!;
+      const res = await call("put", "/update-static-database-user", {
+        Id: 4,
+        UserName: "static_wayne_reports",
+        GenerateNewPassword: false,
+        NewDescription: null,
+        Servers: [{ ServerId: 3, Databases: held }],
+      });
+      const data = res.data as UpdateStaticDatabaseUserResponse;
+      expect(data.Message).toBe("Failure");
+      const stark = data.Servers![0]!.Databases!.find((d) => d.DatabaseId === 105)!;
+      expect(stark.Errors).toEqual([
+        "'tenant_stark' is suspended, so static users cannot be granted it until it is active again.",
+      ]);
+      expect(privs(4)).toEqual([104, 105]);
+    } finally {
+      demoStore.staticUserPrivileges = before;
+    }
+  });
+
+  it("refuses a database that does not exist on create, and does not record it", async () => {
+    const res = await call("post", "/create-static-database-user", {
+      UserPassword: null,
+      Description: null,
+      Servers: [{ ServerId: 1, Databases: [{ DatabaseId: 999, Privileges: null }] }],
+    });
+    const data = res.data as CreateStaticDatabaseUserResponse;
+    expect(data.Message).toBe("Failure");
+    expect(data.Servers![0]!.Databases![0]!.Errors).toEqual([
+      "Database ID 999 does not exist.",
+    ]);
+    const created = demoStore.staticUsers.find((u) => u.UserName === data.UserName)!;
+    expect(privs(created.Id)).toEqual([]);
+  });
+});
+
+describe("demo capacity verdicts", () => {
+  it("marks a server that is not available as Full, with the service's reason", async () => {
+    const res = await call("get", "/get-fleet-capacity");
+    const legacy = (
+      res.data as {
+        Servers: {
+          DatabaseServerId: number;
+          Verdict: string;
+          VerdictReasons: string[];
+        }[];
+      }
+    ).Servers.find((s) => s.DatabaseServerId === 4)!;
+    expect(legacy.Verdict).toBe("Full");
+    expect(legacy.VerdictReasons[0]).toBe(
+      "The server is marked 'retiring', so it is not accepting customers.",
+    );
+  });
+});
+
+describe("demo database updates, as the service applies them", () => {
+  it("refuses a change of server or name while the database is not active, and nothing is saved", async () => {
+    // tenant_stark (105) is suspended.
+    const res = await call("put", "/update-database-info", {
+      Id: 105,
+      DatabaseServerId: 3,
+      DatabaseName: "tenant_stark_renamed",
+      Description: null,
+      CrystalPmId: 66666,
+    });
+    expect(res.data).toEqual({
+      Success: false,
+      Message:
+        "This database's server or name cannot be changed while it is not active or while a move of it can still be rolled back or drop its source. Nothing was saved; reload it and try again.",
+    });
+    expect(demoStore.databases.find((d) => d.Id === 105)?.DatabaseName).toBe(
+      "tenant_stark",
+    );
+  });
+
+  it("still saves a description-only edit of a database that is not active", async () => {
+    const stark = demoStore.databases.find((d) => d.Id === 105)!;
+    const before = stark.Description;
+    try {
+      const res = await call("put", "/update-database-info", {
+        Id: 105,
+        DatabaseServerId: 3,
+        DatabaseName: "tenant_stark",
+        Description: "Stark, suspended",
+        CrystalPmId: 66666,
+      });
+      expect((res.data as { Success: boolean }).Success).toBe(true);
+      expect(demoStore.databases.find((d) => d.Id === 105)?.Description).toBe(
+        "Stark, suspended",
+      );
+    } finally {
+      demoStore.databases.find((d) => d.Id === 105)!.Description = before;
+    }
+  });
+});

@@ -6,7 +6,7 @@
  * setCurrentRole("viewer") actually takes effect and RequireRole has
  * something to gate against.
  */
-import { MantineProvider } from "@mantine/core";
+import { MantineProvider, Tooltip } from "@mantine/core";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,6 +92,23 @@ describe("<RequireRole>", () => {
     const btn = screen.getByTestId("b") as HTMLButtonElement;
     expect(btn).toBeInTheDocument();
     expect(btn.disabled).toBe(true);
+  });
+
+  it("disables a button wrapped in a Tooltip, as the list pages wrap them", () => {
+    // Passing disabled to the direct child reaches only the Tooltip, which
+    // turns the tooltip off and leaves the button inside working.
+    setRoleAct("viewer");
+    const onClick = vi.fn();
+    renderWithMantine(
+      <RequireRole role="admin" fallback="disable">
+        <Tooltip label="Edit user">
+          <button data-testid="b" onClick={onClick}>
+            Edit
+          </button>
+        </Tooltip>
+      </RequireRole>,
+    );
+    expect(screen.getByTestId("b")).toBeDisabled();
   });
 
   it("normalizes 'readonly' / 'read-only' to viewer", () => {

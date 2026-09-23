@@ -62,7 +62,11 @@ export function useCreateDatabase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: CreateDatabaseInfoRequest) => databasesApi.create(request),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.all });
+      // A server's customer count, and its verdict, are capacity inputs.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
+    },
   });
 }
 
@@ -73,6 +77,8 @@ export function useUpdateDatabase() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(variables.Id) });
+      // Moving a registration to another server changes both servers' counts.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }
@@ -84,6 +90,7 @@ export function useDeleteDatabase() {
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.removeQueries({ queryKey: KEYS.detail(id) });
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }

@@ -7,6 +7,7 @@
  * URL the API reads is overridden, exactly as the installer end-to-end script in
  * crystalpm does, and AWS is pointed at credentials that do not exist.
  */
+import { type Connection, createConnection, type RowDataPacket } from "mysql2/promise";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
@@ -228,49 +229,51 @@ function releaseLock(): void {
 }
 
 /**
- * Refuses to go on unless the TCP endpoint the API will be given is this
- * suite's test container and carries the test sentinel schema, the same guard
- * the API's own integration tests apply. The check connects over that endpoint
- * from inside the container, through host.docker.internal, and compares the
- * server's hostname with the container's, so a different server answering on
- * the port is caught.
+ * Refuses to go on unless the endpoint the API will be given, 127.0.0.1 and
+ * this port, is this suite's test container and carries the test sentinel
+ * schema, the same guard the API's own integration tests apply.
+ *
+ * Checked from the host, over exactly that address and port, because that is
+ * the connection the API makes. Asking from inside the container (through
+ * host.docker.internal) could reach the container while a native MySQL on the
+ * host's loopback answered the API, and stops working at all once the test
+ * containers publish on 127.0.0.1 only. The server's hostname is compared with
+ * the container's, so a different server answering on the port is caught.
  */
-function assertTestServer(container: string, port: number): void {
-  const client = container === MARIADB_CONTAINER ? "mariadb" : "mysql";
+async function assertTestServer(container: string, port: number): Promise<void> {
   const expectedHost = run("docker", [
     "inspect",
     "-f",
     "{{.Config.Hostname}}",
     container,
   ]).trim();
-  const args = [
-    "exec",
-    container,
-    client,
-    "-h",
-    "host.docker.internal",
-    "-P",
-    String(port),
-    "-uroot",
-    `-p${DB_PASSWORD}`,
-    "-N",
-    "-B",
-  ];
-  if (client === "mariadb") args.push("--ssl");
-  args.push(
-    "-e",
-    "SELECT @@hostname, (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE schema_name = 'cpm_api_test_sentinel')",
-  );
-  let answer: string;
+  let hostname: string | undefined;
+  let sentinel: number | undefined;
+  let connection: Connection | undefined;
   try {
-    answer = run("docker", args).trim();
+    connection = await createConnection({
+      host: "127.0.0.1",
+      port,
+      user: "root",
+      password: DB_PASSWORD,
+      // The test servers' certificates are self-signed; what is being checked
+      // is which server answers, which the hostname comparison settles.
+      ssl: { rejectUnauthorized: false },
+      connectTimeout: 10_000,
+    });
+    const [rows] = await connection.query<RowDataPacket[]>(
+      "SELECT @@hostname AS hostname, (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE schema_name = 'cpm_api_test_sentinel') AS sentinel",
+    );
+    hostname = String(rows[0]?.hostname ?? "");
+    sentinel = Number(rows[0]?.sentinel ?? 0);
   } catch (error) {
     throw new Error(
       `Could not reach 127.0.0.1:${port} as the test server ${container}; refusing to run. ${(error as Error).message}`,
     );
+  } finally {
+    await connection?.end().catch(() => undefined);
   }
-  const [hostname, sentinel] = answer.split(/\s+/);
-  if (hostname !== expectedHost || sentinel !== "1")
+  if (hostname !== expectedHost || sentinel !== 1)
     throw new Error(
       `127.0.0.1:${port} is not the test container ${container} with the cpm_api_test_sentinel schema (answered as '${hostname}', sentinel ${sentinel ?? "missing"}). Refusing to run against it.`,
     );
@@ -447,8 +450,8 @@ export async function startStack(port: number): Promise<() => Promise<void>> {
   };
   let api: ChildProcess | undefined;
   try {
-    assertTestServer(MYSQL_CONTAINER, MYSQL_PORT);
-    assertTestServer(MARIADB_CONTAINER, MARIADB_PORT);
+    await assertTestServer(MYSQL_CONTAINER, MYSQL_PORT);
+    await assertTestServer(MARIADB_CONTAINER, MARIADB_PORT);
     sweep();
     buildAuthDatabase();
 

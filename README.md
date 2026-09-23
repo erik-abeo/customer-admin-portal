@@ -18,11 +18,12 @@ only ever talks to one origin.
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Login            | Runtime API-key entry (never embedded in the JS bundle). Probes the API to validate the key before unlocking the app. Auto sign-out on `401` (any in-flight request returning 401 force-signs the user out). The session lives in `sessionStorage`, so each tab signs in on its own.                                                                                                                       |
 | Dashboard        | Live totals (servers / databases / authorized users / static users) from the `get-all-*` endpoints, plus a personalized greeting, API-health badge, and a recent-activity feed sourced from the in-memory audit log.                                                                                                                                                                                       |
-| Database servers | List, create, edit (root password, SSL CA, ports), detail view of associated databases. Optional delete (feature-flagged + RBAC).                                                                                                                                                                                                                                                                          |
+| Database servers | List, create, edit (name, description, address, one port, admin username and password, a required SSL CA, the AWS security group), detail view of associated databases. A new server, or an edit that changes its connection, is saved only after "Test connection" passes (an edit can be saved anyway, explicitly). Optional delete (feature-flagged + RBAC).                                            |
 | Databases        | List, create, edit, filter by server. Drill-down detail view shows authorized users for the database. Optional delete (feature-flagged + RBAC).                                                                                                                                                                                                                                                            |
 | Authorized users | List, create, edit, delete, CSV export. Search by email; filter by host restriction (any vs static-only) and by whether the user has any mappings. Inline picker for which databases each Supertokens user can access. URL-driven email filter so deep links from the database detail page survive a refresh.                                                                                              |
 | Static DB users  | List (grouped by username across servers), create, edit, password rotation, per-server / per-database privilege matrix (SELECT/INSERT/UPDATE/DELETE/CREATE/DROP/GRANT/ALL), one-time secret-reveal modal for new passwords. Optional delete (feature-flagged + RBAC).                                                                                                                                      |
 | Event log        | Full UI when `VITE_FEATURE_EVENT_LOG=true`: filter by user / IP / server / database / date range / event type, paginated query with `keepPreviousData` for smooth navigation, expandable row details, CSV export with client-side fallback. When the flag is off the page renders a documented placeholder. See [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md#23-event-log-gated-by-vite_feature_event_log). |
+| Remote databases | Gated by `VITE_FEATURE_MIGRATIONS` (off by default; needs the API's migrations 001 to 011). Migrations: mint a one-time key for a customer's streaming migration, watch it run, revoke it, discard a failed target. Capacity: how full each server is, its trend, and whether it takes new customers. Customer moves: plan, watch, cancel, roll back and settle a move between servers.                    |
 | RBAC             | Optional, gated by `VITE_FEATURE_RBAC`. The portal reads the `X-Admin-Role` response header on every API call (`admin`, or `viewer`, `readonly` or `read-only`) and gates write actions accordingly. When the flag is off, all callers are treated as admins; when it is on, a caller is a viewer until the header says otherwise.                                                                         |
 | Observability    | Opt-in Sentry (`VITE_SENTRY_DSN`) with `api-key` header scrubbing. Opt-in audit-log POST sink (`VITE_FEATURE_AUDIT_SINK` + `VITE_AUDIT_SINK_URL`) that mirrors the in-memory ring buffer to a backend endpoint of your choice.                                                                                                                                                                             |
 | Theming & UX     | CrystalPM-branded header, login, favicon, and loading splash. Light/dark color scheme toggle. Glass-morphism login + header. Mobile-responsive `AppShell`. Code-split routes. Cmd/Ctrl+K command palette. Initial loading splash rendered before React mounts.                                                                                                                                             |
@@ -104,7 +105,7 @@ The portal handles this without baking the key into the bundle:
 
 1. The first request after a fresh load lands on `/login`.
 2. The operator enters their admin name and the API key.
-3. The portal probes `GET /My/get-all-database-server-info` with that key. A
+3. The portal probes `GET /My/get-all-database-info` with that key. A
    `2xx` validates the key; `401`/`403` shows an actionable error.
 4. The key is stored only in the browser tab's `sessionStorage` (key
    `cap.auth.v1`). It is removed on sign-out, on tab close, and on any
@@ -190,7 +191,7 @@ public/
   favicon.svg               # SVG fallback favicon
   robots.txt                # noindex (private admin tool)
 Dockerfile                  # Multi-stage build to nginx-unprivileged
-.github/workflows/ci.yml    # format check + lint + typecheck + test + build + Docker
+.github/workflows/ci.yml    # format + lint + typecheck + test + build, Playwright, Lighthouse, Docker
 .editorconfig               # Whitespace / charset baseline for all editors
 .nvmrc                      # Pinned Node version
 LICENSE                     # Proprietary, internal-use-only license
@@ -309,8 +310,10 @@ CORS entirely and lets you serve everything from a single origin. Edit the
 
 - HSTS, `X-Content-Type-Options`, `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer`, `Permissions-Policy`, and a strict
-  `Content-Security-Policy` (no inline scripts; `connect-src` set to the
-  gateway origin).
+  `Content-Security-Policy` (no inline scripts; `connect-src` allows `'self'`,
+  the gateway origin `https://remotedb.crystalpm.net` and
+  `https://*.ingest.sentry.io`). The headers live in
+  `deploy/security-headers.conf`.
 - Long-lived caching for hashed assets, `no-store` for `index.html`.
 - gzip for text-y content types.
 

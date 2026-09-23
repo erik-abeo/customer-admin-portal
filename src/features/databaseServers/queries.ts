@@ -96,6 +96,10 @@ export function useProbeDatabaseServer() {
   return useMutation({
     mutationFn: (request: ProbeDatabaseServerRequest) =>
       databaseServersApi.probe(request),
+    // Its variables hold the admin password, the stored one on an edit. With no
+    // cache time the mutation leaves the MutationCache as soon as the form
+    // using it unmounts, rather than lingering for the default five minutes.
+    gcTime: 0,
   });
 }
 
@@ -104,7 +108,13 @@ export function useCreateDatabaseServer() {
   return useMutation({
     mutationFn: (request: CreateDatabaseServerInfoRequest) =>
       databaseServersApi.create(request),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
+    // Its variables hold the admin password; the page resets it on close.
+    gcTime: 0,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.all });
+      // A new server is a new row in the fleet reading.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
+    },
   });
 }
 
@@ -113,9 +123,13 @@ export function useUpdateDatabaseServer() {
   return useMutation({
     mutationFn: (request: UpdateDatabaseServerInfoRequest) =>
       databaseServersApi.update(request),
+    // Its variables can hold a new admin password; the page resets it on close.
+    gcTime: 0,
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(variables.Id) });
+      // Name and address show in, and are measured by, the capacity reading.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }
@@ -127,6 +141,7 @@ export function useDeleteDatabaseServer() {
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.removeQueries({ queryKey: KEYS.detail(id) });
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }

@@ -81,10 +81,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     current.current = stored;
   }, [stored]);
 
-  // Cross-tab sign-in / sign-out: react to storage changes from other tabs
-  // so the UI doesn't drift from the actual auth state. Whenever the identity
-  // changes, signed out or signed in as someone else, the cache goes with it:
-  // what one admin fetched is not the next one's to see.
+  // Reacts to a storage event for the session key. This is not cross-tab
+  // sign-out: the session is in sessionStorage, which is per tab, so another
+  // tab's sign-in or sign-out never fires this. It only covers a change made
+  // by another document sharing this tab's session storage. Whenever the
+  // identity changes, signed out or signed in as someone else, the cache goes
+  // with it: what one admin fetched is not the next one's to see.
   useEffect(() => {
     function onStorage(event: StorageEvent) {
       if (event.key !== STORAGE_KEY) return;

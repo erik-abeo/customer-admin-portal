@@ -61,8 +61,11 @@ import type {
   UpdateUserRequest,
 } from "@/api/types";
 
+import { RELOCATION_REFUSED_MESSAGE } from "@/features/databases/editGuard";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
+import { isUnsettledMove } from "@/features/moves/queries";
 
+import { applyVerdict } from "./capacityVerdict";
 import { demoStore } from "./demoStore";
 import { advanceMoves, advanceSessions, restoreSource } from "./simulation";
 
@@ -139,6 +142,21 @@ const UNSETTLED_MOVES = new Set([
  * words. The ones that need a real server, such as a schema existing
  * unregistered, are left to the service.
  */
+/**
+ * Why a static user cannot be granted a database, in the service's words
+ * (StaticDatabaseUserController.WhyNotGrantableAsync): it does not exist, or it
+ * is not active. A refused database is reported in that database's Errors, is
+ * not recorded, and makes the whole response a Failure.
+ */
+function whyNotGrantable(databaseId: number): string | null {
+  const database = demoStore.databases.find((d) => d.Id === databaseId);
+  if (!database) return `Database ID ${databaseId} does not exist.`;
+  const status = database.Status ?? "active";
+  if (status.toLowerCase() !== "active")
+    return `'${database.DatabaseName}' is ${status}, so static users cannot be granted it until it is active again.`;
+  return null;
+}
+
 function mintRefusal(req: CreateMigrationSessionRequest): string | null {
   // As the service checks it: a stale server id is a refusal, and only an
   // available server takes a new customer. A key against a database already
@@ -511,34 +529,30 @@ const ROUTES: Route[] = [
             IsOrphaned: false,
           }));
 
-        const max = 10;
-        const used = databases.length;
-        const verdict =
-          used >= max ? "Full" : used >= max * 0.8 ? "NearCapacity" : "Headroom";
+        const measured = {
+          Status: demoStore.serverStatus(server.Id),
+          CustomerDatabaseCount: databases.length,
+          MaxCustomerDatabases: 10,
+          ThreadsConnected: 18 + index * 22,
+          MaxConnections: 200,
+          Databases: databases.sort(
+            (a, b) => b.DataBytes + b.IndexBytes - (a.DataBytes + a.IndexBytes),
+          ),
+        };
 
         return {
           DatabaseServerId: server.Id,
           Name: server.Name,
           Engine: index === 1 ? "MariaDb" : "MySql",
           EngineVersion: index === 1 ? "10.11.6" : "8.4.3",
-          Status: demoStore.serverStatus(server.Id),
-          CustomerDatabaseCount: used,
-          MaxCustomerDatabases: max,
           AuthorizedUserCount: databases.reduce((n, d) => n + d.AuthorizedUserCount, 0),
           DataBytes: databases.reduce((n, d) => n + d.DataBytes, 0),
           IndexBytes: databases.reduce((n, d) => n + d.IndexBytes, 0),
           ApproxRowCount: databases.reduce((n, d) => n + d.ApproxRowCount, 0),
-          ThreadsConnected: 18 + index * 22,
-          MaxConnections: 200,
-          Verdict: verdict,
-          VerdictReasons: [
-            `${used} of ${max} customer databases used.`,
-            `${18 + index * 22} of 200 connections in use.`,
-          ],
           UnreachableReason: null,
-          Databases: databases.sort(
-            (a, b) => b.DataBytes + b.IndexBytes - (a.DataBytes + a.IndexBytes),
-          ),
+          ...measured,
+          // Worked out as the service works it out, reasons and all.
+          ...applyVerdict(measured),
         };
       });
 
@@ -1001,11 +1015,25 @@ const ROUTES: Route[] = [
       const idx = demoStore.databases.findIndex((d) => d.Id === req.Id);
       if (idx === -1) return notFound(`Database ${req.Id} not found`);
       const current = demoStore.databases[idx];
+      // As the service: blank strings are skipped, and a change of server or
+      // name is written only if it is no change, or the database is active
+      // with no move of it that can still roll back or drop its source.
+      const serverId = req.DatabaseServerId ?? current.DatabaseServerId;
+      const name = req.DatabaseName?.trim() ? req.DatabaseName : current.DatabaseName;
+      const relocating =
+        serverId !== current.DatabaseServerId || name !== current.DatabaseName;
+      const movable =
+        current.Status === "active" &&
+        !demoStore.customerMoves.some(
+          (m) => m.DatabaseId === current.Id && isUnsettledMove(m),
+        );
+      if (relocating && !movable)
+        return ok({ Success: false, Message: RELOCATION_REFUSED_MESSAGE });
       demoStore.databases[idx] = {
         ...current,
-        DatabaseServerId: req.DatabaseServerId ?? current.DatabaseServerId,
-        DatabaseName: req.DatabaseName ?? current.DatabaseName,
-        Description: req.Description ?? current.Description,
+        DatabaseServerId: serverId,
+        DatabaseName: name,
+        Description: req.Description?.trim() ? req.Description : current.Description,
         CrystalPmId: req.CrystalPmId ?? current.CrystalPmId,
       };
       demoStore.recordAdminEvent(
@@ -1188,6 +1216,7 @@ const ROUTES: Route[] = [
       // The service generates the password and ignores any in the request.
       const password = "demo-generated-password";
       const results: CreateStaticDatabaseUserResponse["Servers"] = [];
+      let failed = false;
       for (const serverEntry of req.Servers) {
         const id = demoStore.staticUserIds.next();
         demoStore.staticUsers.push({
@@ -1198,8 +1227,10 @@ const ROUTES: Route[] = [
           CreatedDateTimeUtc: new Date().toISOString(),
           LastModifiedDateTimeUtc: new Date().toISOString(),
         });
-        // Carry the privilege grid over.
-        demoStore.staticUserPrivileges[id] = serverEntry.Databases.map(
+        // Carry the grantable part of the privilege grid over.
+        demoStore.staticUserPrivileges[id] = serverEntry.Databases.filter(
+          (d) => whyNotGrantable(d.DatabaseId) === null,
+        ).map(
           (d): DatabasePrivilegeInfo => ({
             DatabaseId: d.DatabaseId,
             Privileges: d.Privileges,
@@ -1216,12 +1247,14 @@ const ROUTES: Route[] = [
           Certificate: server?.Certificate ?? null,
           Databases: serverEntry.Databases.map((d) => {
             const db = demoStore.databases.find((x) => x.Id === d.DatabaseId);
+            const refusal = whyNotGrantable(d.DatabaseId);
+            if (refusal) failed = true;
             return {
               DatabaseId: d.DatabaseId,
-              DatabaseName: db?.DatabaseName ?? null,
-              Description: db?.Description ?? null,
+              DatabaseName: refusal ? null : (db?.DatabaseName ?? null),
+              Description: refusal ? null : (db?.Description ?? null),
               Privileges: d.Privileges,
-              Errors: [],
+              Errors: refusal ? [refusal] : [],
             };
           }),
           Errors: [],
@@ -1233,7 +1266,7 @@ const ROUTES: Route[] = [
       );
       const response: CreateStaticDatabaseUserResponse = {
         UserName: userName,
-        Message: "Success",
+        Message: failed ? "Failure" : "Success",
         Servers: results,
       };
       return ok(response);
@@ -1264,24 +1297,41 @@ const ROUTES: Route[] = [
           });
           continue;
         }
-        if (req.NewDescription) row.Description = req.NewDescription;
+        if (req.NewDescription?.trim()) row.Description = req.NewDescription;
         row.LastModifiedDateTimeUtc = new Date().toISOString();
-        demoStore.staticUserPrivileges[row.Id] = serverEntry.Databases.map(
-          (d): DatabasePrivilegeInfo => ({
-            DatabaseId: d.DatabaseId,
-            Privileges: d.Privileges,
-          }),
-        );
-        servers.push({
-          ServerId: serverEntry.ServerId,
-          Databases: serverEntry.Databases.map((d) => ({
+        // Per server, as the service does it: this server's grid replaces what
+        // the user held on this server, so a database left out is revoked
+        // here. A requested database that cannot be granted is not recorded;
+        // whatever the user already held on it stays as it was.
+        const held = demoStore.staticUserPrivileges[row.Id] ?? [];
+        const next: DatabasePrivilegeInfo[] = [];
+        const databases = serverEntry.Databases.map((d) => {
+          const refusal = whyNotGrantable(d.DatabaseId);
+          if (refusal) {
+            failed = true;
+            const kept = held.find((h) => h.DatabaseId === d.DatabaseId);
+            if (kept) next.push(kept);
+            return {
+              DatabaseId: d.DatabaseId,
+              DatabaseName: null,
+              Privileges: d.Privileges,
+              Errors: [refusal],
+            };
+          }
+          next.push({ DatabaseId: d.DatabaseId, Privileges: d.Privileges });
+          return {
             DatabaseId: d.DatabaseId,
             DatabaseName:
               demoStore.databases.find((x) => x.Id === d.DatabaseId)?.DatabaseName ??
               null,
             Privileges: d.Privileges,
             Errors: [],
-          })),
+          };
+        });
+        demoStore.staticUserPrivileges[row.Id] = next;
+        servers.push({
+          ServerId: serverEntry.ServerId,
+          Databases: databases,
           Errors: [],
         });
       }

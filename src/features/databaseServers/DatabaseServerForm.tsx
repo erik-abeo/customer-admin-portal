@@ -278,7 +278,7 @@ export function DatabaseServerForm({
             />
             <TextInput
               label="Remote server address"
-              description="Public address used by external clients (optional)"
+              description="Address clients connect to. Optional: when blank, clients are given the local address."
               placeholder="db-east-1.crystalpm.com"
               {...form.getInputProps("RemoteServerAddress")}
             />

@@ -36,9 +36,14 @@ export function useCreateAuthorizedUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: CreateUserRequest) => authorizedUsersApi.create(request),
+    // Its variables hold the user's password. With no cache time it leaves the
+    // MutationCache once the page resets it on close, not five minutes later.
+    gcTime: 0,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
+      // Authorized users per server and database are capacity inputs.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }
@@ -47,8 +52,12 @@ export function useUpdateAuthorizedUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: UpdateUserRequest) => authorizedUsersApi.update(request),
+    // Its variables can hold a new password; see useCreateAuthorizedUser.
+    gcTime: 0,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
+      // Authorized users per server and database are capacity inputs.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }
@@ -59,6 +68,8 @@ export function useDeleteAuthorizedUser() {
     mutationFn: (userId: number | string) => authorizedUsersApi.remove(userId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
+      // Authorized users per server and database are capacity inputs.
+      qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
   });
 }

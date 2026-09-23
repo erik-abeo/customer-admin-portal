@@ -20,7 +20,7 @@ import type {
   UpdateStaticDatabaseUserRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
-import { maxLength } from "@/lib/validators";
+import { composeValidators, maxLength, notClearable } from "@/lib/validators";
 
 import { PrivilegesEditor } from "./PrivilegesEditor";
 
@@ -63,7 +63,12 @@ export function StaticUserForm({
     },
     validateInputOnBlur: true,
     validate: {
-      Description: maxLength(500, "Description"),
+      // The service skips an empty description on update, so clearing it would
+      // report success and leave the old text in place.
+      Description: composeValidators(
+        maxLength(500, "Description"),
+        notClearable("Description", initial?.Description),
+      ),
       Servers: (servers) =>
         servers.length === 0
           ? "Add at least one server with database privileges"

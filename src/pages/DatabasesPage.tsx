@@ -15,13 +15,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
-import {
-  IconEdit,
-  IconEye,
-  IconPlus,
-  IconRefresh,
-  IconTrash,
-} from "@tabler/icons-react";
+import { IconEye, IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -34,6 +28,7 @@ import { QueryStatus } from "@/components/common/QueryStatus";
 import { SortableHeader } from "@/components/common/SortableHeader";
 import { features } from "@/config/env";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
+import { DatabaseEditButton } from "@/features/databases/DatabaseEditButton";
 import { DatabaseForm } from "@/features/databases/DatabaseForm";
 import {
   DATABASE_STATUS_COLOR,
@@ -315,17 +310,10 @@ export function DatabasesPage() {
                               <IconEye size={16} />
                             </ActionIcon>
                           </Tooltip>
-                          <RequireRole role="admin" fallback="disable">
-                            <Tooltip label="Edit database">
-                              <ActionIcon
-                                variant="subtle"
-                                onClick={() => setEditTarget(d)}
-                                aria-label="Edit"
-                              >
-                                <IconEdit size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                          </RequireRole>
+                          <DatabaseEditButton
+                            database={d}
+                            onEdit={() => setEditTarget(d)}
+                          />
                           {features.deletes && (
                             <RequireRole role="admin" fallback="disable">
                               <Tooltip label="Delete database">

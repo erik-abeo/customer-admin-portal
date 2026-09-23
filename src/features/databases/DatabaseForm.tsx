@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Divider,
   Group,
@@ -9,6 +10,7 @@ import {
   Textarea,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
+import { useState } from "react";
 import { IconDatabase, IconHash } from "@tabler/icons-react";
 
 import type {
@@ -17,7 +19,12 @@ import type {
   DatabaseServerInfoItem,
   UpdateDatabaseInfoRequest,
 } from "@/api/types";
+import { databasesApi } from "@/api/databases";
 import { FormSection } from "@/components/common/FormSection";
+import {
+  whyDatabaseCannotRelocate,
+  whyDatabaseEditIsStale,
+} from "@/features/databases/editGuard";
 import {
   composeValidators,
   identifier,
@@ -54,6 +61,12 @@ export function DatabaseForm({
   onSubmit,
   submitting,
 }: DatabaseFormProps) {
+  const [refusal, setRefusal] = useState<string | null>(null);
+  // The service changes a server or name only while the database is active, so
+  // outside that only the description and customer id are editable.
+  const relocationLocked = initial ? whyDatabaseCannotRelocate(initial.Status) : null;
+  const [checking, setChecking] = useState(false);
+
   const form = useForm<DatabaseFormValues>({
     initialValues: {
       DatabaseServerId:
@@ -92,6 +105,26 @@ export function DatabaseForm({
       CrystalPmId: Number(values.CrystalPmId),
     };
     if (initial) {
+      // Re-read first: the form was filled from the row as it was when Edit
+      // was clicked, and saving it after a move or another edit would put the
+      // old server or name back. The service refuses this too.
+      setRefusal(null);
+      setChecking(true);
+      try {
+        const current = await databasesApi.get(initial.Id);
+        const stale = whyDatabaseEditIsStale(initial, current.DatabaseInfo, base);
+        if (stale) {
+          setRefusal(stale);
+          return;
+        }
+      } catch (error) {
+        setRefusal(
+          `Could not check the database before saving: ${(error as Error).message}`,
+        );
+        return;
+      } finally {
+        setChecking(false);
+      }
       const payload: UpdateDatabaseInfoRequest = { Id: initial.Id, ...base };
       await onSubmit(payload);
     } else {
@@ -126,11 +159,18 @@ export function DatabaseForm({
             }
             error={form.errors.DatabaseServerId as string | undefined}
             searchable
+            disabled={relocationLocked !== null}
           />
           <TextInput
             label="Database name"
             placeholder="cpm_42"
             required
+            disabled={relocationLocked !== null}
+            description={
+              relocationLocked
+                ? `The server and name cannot be changed while this database is ${relocationLocked}.`
+                : undefined
+            }
             styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
             {...form.getInputProps("DatabaseName")}
           />
@@ -160,11 +200,17 @@ export function DatabaseForm({
           />
         </FormSection>
 
+        {refusal && (
+          <Alert color="red" variant="light" role="alert">
+            {refusal}
+          </Alert>
+        )}
+
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" loading={submitting}>
+          <Button type="submit" loading={submitting || checking}>
             {submitLabel}
           </Button>
         </Group>

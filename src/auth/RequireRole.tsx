@@ -63,9 +63,24 @@ export function RequireRole({
     disabled: true,
   });
 
+  // The clone only reaches the direct child. When that is a Tooltip around the
+  // button, as on the list pages, `disabled` switches the tooltip off and the
+  // button stays live, so the disabled fieldset is what actually disables
+  // every control inside, however deep.
   return (
     <Tooltip label={reason} withArrow>
-      <span style={{ display: "inline-block" }}>{disabled}</span>
+      <fieldset
+        disabled
+        style={{
+          display: "inline-block",
+          border: 0,
+          margin: 0,
+          padding: 0,
+          minWidth: 0,
+        }}
+      >
+        {disabled}
+      </fieldset>
     </Tooltip>
   );
 }

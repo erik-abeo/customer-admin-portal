@@ -53,6 +53,13 @@ variable "alb_listener_arn" {
   type = string
 }
 
+# The security group of the ALB in front of the task. The task's group admits
+# 8080 from it and from nothing else, so without it the ALB cannot reach the
+# container and every target fails its health check.
+variable "alb_security_group_id" {
+  type = string
+}
+
 variable "host_header" {
   type    = string
   default = "admin.example.internal"
@@ -107,6 +114,13 @@ resource "aws_security_group" "task" {
   name        = "customer-admin-portal-task"
   description = "Customer Admin Portal Fargate task SG"
   vpc_id      = var.vpc_id
+  ingress {
+    description     = "HTTP from the ALB only"
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [var.alb_security_group_id]
+  }
   egress {
     from_port   = 0
     to_port     = 0

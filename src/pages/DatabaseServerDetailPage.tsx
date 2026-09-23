@@ -1,5 +1,4 @@
 import {
-  ActionIcon,
   Badge,
   Button,
   Card,
@@ -12,7 +11,6 @@ import {
   Table,
   Text,
   Title,
-  Tooltip,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconEdit, IconPlus } from "@tabler/icons-react";
@@ -22,6 +20,8 @@ import { useParams } from "react-router-dom";
 import type { DatabaseInfoItem } from "@/api/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
+import { RequireRole } from "@/auth/RequireRole";
+import { DatabaseEditButton } from "@/features/databases/DatabaseEditButton";
 import { DatabaseServerForm } from "@/features/databaseServers/DatabaseServerForm";
 import {
   useDatabaseServer,
@@ -68,7 +68,10 @@ export function DatabaseServerDetailPage() {
   const updateDb = useUpdateDatabase();
   const updateServer = useUpdateDatabaseServer();
 
-  const [editServerOpened, editServerCtl] = useDisclosure(false);
+  // Resetting on close drops any new password in the mutation's variables.
+  const [editServerOpened, editServerCtl] = useDisclosure(false, {
+    onClose: () => updateServer.reset(),
+  });
   // The decrypted password and certificate are read only while the form is open.
   const editServerQ = useDatabaseServerForEdit(editServerOpened ? serverId : undefined);
   const [createDbOpened, createDbCtl] = useDisclosure(false);
@@ -103,13 +106,15 @@ export function DatabaseServerDetailPage() {
         }
         actions={
           server && (
-            <Button
-              variant="default"
-              leftSection={<IconEdit size={16} />}
-              onClick={editServerCtl.open}
-            >
-              Edit server
-            </Button>
+            <RequireRole role="admin">
+              <Button
+                variant="default"
+                leftSection={<IconEdit size={16} />}
+                onClick={editServerCtl.open}
+              >
+                Edit server
+              </Button>
+            </RequireRole>
           )
         }
       />
@@ -164,13 +169,15 @@ export function DatabaseServerDetailPage() {
               .
             </Text>
           </Stack>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={createDbCtl.open}
-            disabled={!server}
-          >
-            Add database
-          </Button>
+          <RequireRole role="admin">
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={createDbCtl.open}
+              disabled={!server}
+            >
+              Add database
+            </Button>
+          </RequireRole>
         </Group>
 
         <QueryStatus
@@ -180,13 +187,15 @@ export function DatabaseServerDetailPage() {
           emptyMessage="No databases on this server yet"
           emptyDescription="Add the first customer database to make this server useful."
           emptyAction={
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={createDbCtl.open}
-              disabled={!server}
-            >
-              Add database
-            </Button>
+            <RequireRole role="admin">
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={createDbCtl.open}
+                disabled={!server}
+              >
+                Add database
+              </Button>
+            </RequireRole>
           }
           onRetry={() => void dbsQ.refetch()}
           loadingSkeleton={{ rows: 4, columns: 4 }}
@@ -224,15 +233,10 @@ export function DatabaseServerDetailPage() {
                       </Text>
                     </Table.Td>
                     <Table.Td>
-                      <Tooltip label="Edit database">
-                        <ActionIcon
-                          variant="subtle"
-                          onClick={() => setEditDbTarget(d)}
-                          aria-label="Edit"
-                        >
-                          <IconEdit size={16} />
-                        </ActionIcon>
-                      </Tooltip>
+                      <DatabaseEditButton
+                        database={d}
+                        onEdit={() => setEditDbTarget(d)}
+                      />
                     </Table.Td>
                   </Table.Tr>
                 ))}

@@ -145,7 +145,14 @@ export function AppLayout() {
         <AppShell.Header className="app-header" withBorder={false}>
           <Group h="100%" px="md" justify="space-between">
             <Group gap="sm">
-              <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+              <Burger
+                opened={opened}
+                onClick={toggle}
+                hiddenFrom="sm"
+                size="sm"
+                aria-label={opened ? "Close navigation" : "Open navigation"}
+                aria-expanded={opened}
+              />
               <Brand height={32} />
             </Group>
             <Group gap="xs">

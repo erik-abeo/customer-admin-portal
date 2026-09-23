@@ -59,8 +59,15 @@ export function AuthorizedUsersPage() {
   const update = useUpdateAuthorizedUser();
   const remove = useDeleteAuthorizedUser();
 
-  const [createOpened, createCtl] = useDisclosure(false);
+  // Resetting on close drops the password in the mutation's variables.
+  const [createOpened, createCtl] = useDisclosure(false, {
+    onClose: () => create.reset(),
+  });
   const [editTarget, setEditTarget] = useState<AuthorizedUserInfoItem | null>(null);
+  const closeEdit = () => {
+    setEditTarget(null);
+    update.reset();
+  };
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [hostFilter, setHostFilter] = useState<"all" | "static" | "any">("all");
@@ -401,7 +408,7 @@ export function AuthorizedUsersPage() {
 
       <Modal
         opened={editTarget !== null}
-        onClose={() => setEditTarget(null)}
+        onClose={closeEdit}
         title={editTarget ? `Edit ${editTarget.Email}` : "Edit"}
         size="lg"
       >
@@ -411,7 +418,7 @@ export function AuthorizedUsersPage() {
             databases={databases.data ?? []}
             initial={editTarget}
             submitLabel="Save changes"
-            onCancel={() => setEditTarget(null)}
+            onCancel={closeEdit}
             submitting={update.isPending}
             onSubmit={async (payload) => {
               try {
@@ -419,7 +426,7 @@ export function AuthorizedUsersPage() {
                   payload as Parameters<typeof update.mutateAsync>[0],
                 );
                 notifySuccess("User updated");
-                setEditTarget(null);
+                closeEdit();
               } catch (e) {
                 notifyError(e, "Failed to update user");
               }

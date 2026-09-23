@@ -113,8 +113,15 @@ export function DatabaseServersPage() {
     });
   };
 
-  const [createOpened, createCtl] = useDisclosure(false);
+  // Resetting on close drops the password in the mutation's variables.
+  const [createOpened, createCtl] = useDisclosure(false, {
+    onClose: () => create.reset(),
+  });
   const [editTarget, setEditTarget] = useState<DatabaseServerInfoItem | null>(null);
+  const closeEdit = () => {
+    setEditTarget(null);
+    update.reset();
+  };
   // The list carries no secrets, so the form is given the server read by id.
   const editServer = useDatabaseServerForEdit(editTarget?.Id);
 
@@ -333,7 +340,7 @@ export function DatabaseServersPage() {
 
       <Modal
         opened={editTarget !== null}
-        onClose={() => setEditTarget(null)}
+        onClose={closeEdit}
         title={editTarget ? `Edit ${editTarget.Name}` : "Edit"}
         size="lg"
       >
@@ -344,7 +351,7 @@ export function DatabaseServersPage() {
           <DatabaseServerForm
             initial={editServer.data}
             submitLabel="Save changes"
-            onCancel={() => setEditTarget(null)}
+            onCancel={closeEdit}
             submitting={update.isPending}
             onSubmit={async (payload) => {
               try {
@@ -360,7 +367,7 @@ export function DatabaseServersPage() {
                   return;
                 }
                 notifySuccess("Server updated");
-                setEditTarget(null);
+                closeEdit();
               } catch (e) {
                 notifyError(e, "Failed to update server");
               }

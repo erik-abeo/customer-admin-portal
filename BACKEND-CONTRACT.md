@@ -36,8 +36,8 @@ strategy; no other UI code needs to change.
 
 Optional response header `X-Admin-Role`: when present, the SPA reads the
 caller's role from this header and gates write actions in the UI. Allowed
-values are `admin` (full write access) and `viewer` / `readonly`
-(read-only). The header is consumed by `captureRoleHeader` in
+values are `admin` (full write access) and `viewer`, `readonly` or
+`read-only` (read-only), in any case. The header is consumed by `captureRoleHeader` in
 `src/api/httpClient.ts`. `VITE_FEATURE_RBAC` is a boolean switch, not a role:
 when it is off, every caller is treated as `admin`; when it is on and no
 header has been seen yet, the SPA treats the caller as `viewer` until one
@@ -191,6 +191,12 @@ On create, blank optional fields (`Description`, `RemoteServerAddress`,
 `SecurityGroupId`) are stored as NULL, so "not set" has one meaning for
 everything that reads them. The portal sends null for them already.
 
+`RemoteServerAddress` is optional. When it is blank, the address handed to
+clients falls back to `LocalServerAddress`: in the CrystalPM client's
+authorization response, in a new static user's connection details, and in the
+credentials a migration key redeems for. Leave it blank only when clients reach
+the server on its local address.
+
 `database_server_info` records an **`AdminUserName`** per server, and it appears
 on `CreateDatabaseServerInfoRequest`, `UpdateDatabaseServerInfoRequest`,
 `DatabaseServerInfoItem` and `GetDatabaseServerInfoResponse`. It defaults to
@@ -221,7 +227,10 @@ still carry `DatabaseServerId` alongside `DatabaseId`, and the backend no longer
 stores it: a database's server is recorded on the database itself. The pair is
 **validated rather than ignored**. If any mapping names a server the database is
 not on, or a database that does not exist, the whole request is rejected with
-**400** and a message naming every offending pair.
+**400** and a message naming every offending pair (`databaseId=N with
+databaseServerId=M`). The check runs before SuperTokens is touched, on create
+and on update alike, so a refused request changes nothing: no identity is
+created, and no email or password is changed.
 
 The SPA already derives `DatabaseServerId` from the selected database's own
 record, so this should never fire in normal use. It exists so that a caller
@@ -233,9 +242,29 @@ silently creating a user who cannot reach their database.
 `DatabaseInfoItem` has a **`Status`**: `active`, `moving`, `suspended` or
 `retired`. It is returned by `get-all-database-info` and
 `get-database-info/{id}`, and is set by the service rather than by
-`create-database-info` or `update-database-info`. `moving` is set while a customer move
-holds the database, `suspended` by an operator, and `retired` by hand once a
-database is out of service.
+`create-database-info` or `update-database-info`. `moving` is set by the
+service while a customer move holds the database. No endpoint sets `suspended`
+or `retired`: both are set by hand in `database_info.status`, `suspended` by an
+operator and `retired` once a database is out of service.
+
+What each status means to the CrystalPM client, which authorizes through
+`AuthorizeClient` and `AuthorizeClient2` (the portal calls neither):
+
+- `moving` answers **503** "Your database is temporarily unavailable. Please try
+  again shortly." with `Retry-After: 15`. The client waits it out, reusing its
+  access token. A moving database is still offered in the selection list, so a
+  user with several databases is asked which one they want rather than being
+  sent to another; picking the moving one then gets the 503.
+- `suspended` and `retired` answer **403** "This database is not available.
+  Please contact CrystalPM support." with no `Retry-After`: the credentials are
+  fine, and neither signing in again nor waiting will help. Both are left out of
+  the selection list, and if only suspended or retired databases remain for a
+  user, the first call answers the 403.
+
+Suspending or retiring a database does not revoke static users' existing
+grants on it; it only stops new grants, which are refused for any database that
+is not `active`. Revoke them by editing the static user if they should stop
+too.
 
 Only an `active` database can be migrated into or moved. The service refuses the
 rest, with a `Message` naming the status. The UI shows the status wherever a
@@ -245,6 +274,44 @@ migration picker also disables a database belonging to a customer other than
 the one entered, and the move picker one whose earlier move has cut over and
 not been settled or rolled back. The
 refusal stays the backstop for a status that changed after the list was loaded.
+
+**Updating a database** (`update-database-info`) skips blank strings, as the
+server update does, so `Description` cannot be cleared through it. A change of
+`DatabaseServerId` or `DatabaseName` is written only when it is no change, or
+when the database is `active` with no move of it that can still roll back or
+drop its source (planned through flipped, or settled with the source drop
+unfinished). The check is part of the same `UPDATE`, so a move cutting over at
+that moment cannot slip past it. A refusal is **200** with `Success: false` and
+nothing saved:
+
+> This database's server or name cannot be changed while it is not active or
+> while a move of it can still be rolled back or drop its source. Nothing was
+> saved; reload it and try again.
+
+An edit that changes only the description or customer id is still written in
+any status, including while the database is moving. The portal locks the server
+and name fields of a database that is not active, re-reads the database before
+saving and refuses if its server or name changed since the form was opened, and
+shows the service's `Message` for any refusal.
+
+### 1.4a Static user updates
+
+`update-static-database-user` takes one row's `Id` and the `UserName`, which
+must match, plus a `Servers` list with the full privilege grid for each server.
+A static user has one row per server, all sharing the name, and the update
+applies to all of them: current privileges are loaded by user name across every
+server, keyed by `(database_server_id, user_name)`, and on each server in the
+request the grid replaces what the user held there. A database left out of a
+server's grid is revoked on that server; a server whose grid is empty loses all
+its grants. The wire format is unchanged.
+
+Each database in a grid must exist and be `active`. One that is not is refused
+in that database's `Errors` ("Database ID N does not exist." or "'name' is
+status, so static users cannot be granted it until it is active again."), is
+not recorded, and keeps whatever grant it already had; the top-level `Message`
+is then `Failure`. A server in the request that the user is not on is reported
+as a failure in that server's `Errors`. `NewDescription` is skipped when blank,
+so a description cannot be cleared.
 
 ### 1.5 Server capacity and placement
 
@@ -373,8 +440,10 @@ if a server is replaced under a move already in flight.
   carry static users yet;
 - a migration that is still streaming into the database (`redeemed` or
   `streaming`), since quiescing does not stop the installer's login;
-- a customer that already has a move in flight, one that has cut over and not
-  been settled or rolled back, or one whose source drop never finished;
+- a database that already has a move in flight, one that has cut over and not
+  been settled or rolled back, or one whose source drop never finished. The check
+  is per database, not per customer: the message says "customer", but a customer
+  with a second database on another server can move that one;
 - a target server the customer is already on;
 - a target database name that is already registered on the target server, for
   any customer;
@@ -382,10 +451,14 @@ if a server is replaced under a move already in flight.
   flip would collide with it;
 - a target name that is not a usable identifier (letters, digits and
   underscores, starting with a letter);
-- a database with no recorded name, so there is nothing to copy from.
+- a database with no recorded name, so there is nothing to copy from. With no
+  `TargetDatabaseName` the target name falls back to that missing source name,
+  and the identifier check runs first, so the message is then the "is not a
+  usable database name" one.
 
-It answers 409 when another move for the same customer was planned at the same
-moment and won; refresh to see it.
+It answers 409 when another move for the same database was planned at the same
+moment and won; refresh to see it. The message says "customer", but the guard is
+per database, the same as the in-flight check.
 
 Planning then checks the live target as well, and fails the move without
 quiescing anyone if a schema of that name already exists there, registered or
@@ -528,9 +601,10 @@ true, `DatabaseId` is not null and the status is `failed`, `revoked` or
 
 It also refuses, with `Success: false` and a message naming why, when:
 
-- another session streamed into the same database and did not fail. A retry is
-  minted against the first attempt's database as an existing one; once that
-  retry succeeds, or while it runs, the database is the customer's;
+- any other session on the same database has not failed, been revoked or
+  expired. That includes a retry key that is still `pending`: a retry is minted
+  against the first attempt's database as an existing one, and once it is
+  minted, running or done, the database may be the customer's;
 - any authorized user is mapped to the database, any static user holds
   privileges on it, or any move refers to it.
 
@@ -538,6 +612,12 @@ It answers **409** with a `Message` when the database's registration has been
 repointed since the session created it: another schema name, or the same name
 on another server. Dropping it then would drop something this session never
 made. The portal shows the `Message` as it does for every other 409.
+
+The schema is dropped inside the transaction that deletes the database's
+registration, after the delete and before its commit. A foreign key refusing the
+delete stops it before the schema is touched, and a drop that fails rolls the
+delete back, so the registration is still there and a retry of the discard
+finishes the job.
 
 Dropping detaches the sessions that pointed at the database rather than deleting
 them, so the history survives. A second discard of the same session answers

@@ -71,10 +71,11 @@ test.describe("Keyboard navigation", () => {
     const search = page.getByLabel("Search");
     await search.focus();
     await expect(search).toBeFocused();
-    await page.keyboard.type("us-east");
-    // Wait for the debounce + render. The visible "Showing X of Y" text
-    // updates with the filter so we can assert against it.
-    await expect(page.getByText(/Showing \d+ of \d+/)).toBeVisible();
+    // Matches one of the two mocked servers, so the count has to change.
+    await page.keyboard.type("prod-02");
+    await expect(page.getByText("Showing 1 of 2")).toBeVisible();
+    await expect(page.getByText("us-east-prod-02")).toBeVisible();
+    await expect(page.getByText("us-east-prod-01")).toHaveCount(0);
   });
 
   test("Mantine modal opens via keyboard activation and closes with Escape", async ({
@@ -117,5 +118,18 @@ test.describe("Keyboard navigation", () => {
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(menu).not.toBeVisible();
+  });
+
+  test("the phone-width navigation toggle is named and says whether it is open", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    const open = page.getByRole("button", { name: "Open navigation" });
+    await expect(open).toHaveAttribute("aria-expanded", "false");
+    await open.click();
+    await expect(
+      page.getByRole("button", { name: "Close navigation" }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 });
