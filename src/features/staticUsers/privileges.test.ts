@@ -9,6 +9,7 @@ import {
 import {
   GRANTABLE_PRIVILEGES,
   hasGrantablePrivilege,
+  whyNotGrantableStatus,
   whyPrivilegesIncomplete,
   withoutGrantOption,
 } from "./privileges";
@@ -72,5 +73,36 @@ describe("static user privileges", () => {
     ]);
     expect(grid!.Databases[0]!.Privileges.GrantPrivilege).toBe(false);
     expect(grid!.Databases[0]!.Privileges.SelectPrivilege).toBe(true);
+  });
+
+  it("flags a ticked database that is no longer active, and says to untick it", () => {
+    const moving = [
+      { Id: 100, DatabaseName: "tenant_acme", Status: "moving" },
+    ] as DatabaseInfoItem[];
+    expect(
+      whyPrivilegesIncomplete(
+        [
+          {
+            ServerId: 1,
+            Databases: [
+              {
+                DatabaseId: 100,
+                Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+              },
+            ],
+          },
+        ],
+        servers,
+        moving,
+      ),
+    ).toBe(
+      "Untick tenant_acme on east-1 (a customer move is in progress): static users can only be granted an active database, and the service refuses the whole change otherwise.",
+    );
+  });
+
+  it("does not hold a missing status against a database", () => {
+    expect(whyNotGrantableStatus(undefined)).toBeNull();
+    expect(whyNotGrantableStatus("active")).toBeNull();
+    expect(whyNotGrantableStatus("suspended")).toBe("suspended");
   });
 });

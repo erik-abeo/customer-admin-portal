@@ -68,8 +68,10 @@ talks to the ClientRemoteDatabaseAccessAPI over HTTPS.
   and `eval`; `style-src` allows `'unsafe-inline'`, which Mantine's runtime
   styles need. See `deploy/security-headers.conf`.
 - **Secrets in code:** none. The repository contains an `.env.example`. The
-  `api-key`, Sentry DSN, and other deployment-specific values are injected at
-  build / runtime.
+  `api-key` is typed by the operator at login and never built in. The Sentry
+  DSN and every other setting are build args, compiled into the bundle and so
+  readable by anyone who can load it; none of them is a secret, and there is no
+  runtime configuration.
 - **Source maps:** built as `hidden` in production and stripped from the
   Docker image. Nothing uploads them to Sentry today; `deploy/README.md`
   describes how a CI job could.
@@ -103,7 +105,7 @@ talks to the ClientRemoteDatabaseAccessAPI over HTTPS.
 | Stolen API key                          | sessionStorage only; idle sign-out; HTTPS-only transport                                                                                                                                                     |
 | XSS via injected content in admin input | React escapes by default; CSP forbids inline scripts and `eval` (`style-src` allows inline styles)                                                                                                           |
 | CSRF                                    | API requires the `api-key` header; cookies aren't used                                                                                                                                                       |
-| Open redirect on `/login?redirect=`     | `safeRedirect` (`src/auth/redirectSafety.ts`) rejects absolute / `//` paths                                                                                                                                  |
+| Open redirect on `/login?redirect=`     | `safeRedirect` (`src/auth/redirectSafety.ts`) accepts only a same-origin path: it rejects absolute URLs, `//` and `/\`, and a backslash or control character anywhere                                        |
 | Source-map exposure                     | Vite emits `hidden` maps; Dockerfile strips `*.map` before publishing                                                                                                                                        |
 | Cross-tab session drift                 | None: each tab holds its own session in `sessionStorage`, whose changes never reach another tab, so signing out in one tab does not sign out the others. Close the other tabs, or rely on the idle sign-out. |
 | Inactive workstation                    | `useIdleSignOut` warning + automatic sign-out after threshold                                                                                                                                                |

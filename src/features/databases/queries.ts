@@ -62,7 +62,11 @@ export function useCreateDatabase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: CreateDatabaseInfoRequest) => databasesApi.create(request),
-    onSuccess: () => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       // A server's customer count, and its verdict, are capacity inputs.
       qc.invalidateQueries({ queryKey: ["server-capacity"] });
@@ -74,7 +78,11 @@ export function useUpdateDatabase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: UpdateDatabaseInfoRequest) => databasesApi.update(request),
-    onSuccess: (_data, variables) => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: (_data, _error, variables) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(variables.Id) });
       // Moving a registration to another server changes both servers' counts.
@@ -87,11 +95,16 @@ export function useDeleteDatabase() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => databasesApi.remove(id),
-    onSuccess: (_data, id) => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
-      qc.removeQueries({ queryKey: KEYS.detail(id) });
       qc.invalidateQueries({ queryKey: ["server-capacity"] });
     },
+    // The detail goes only once the record is gone.
+    onSuccess: (_data, id) => qc.removeQueries({ queryKey: KEYS.detail(id) }),
   });
 }
 

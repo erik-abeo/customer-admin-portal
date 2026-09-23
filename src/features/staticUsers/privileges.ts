@@ -4,6 +4,7 @@ import type {
   DatabaseServerInfoItem,
   DatabaseServerPrivilegeInfo,
 } from "@/api/types";
+import { whyDatabaseUnavailable } from "@/features/databases/status";
 
 /**
  * The privileges the service turns into a GRANT, in the order the editor shows
@@ -27,29 +28,55 @@ export const hasGrantablePrivilege = (privileges: DatabasePrivileges | null): bo
   privileges !== null && GRANTABLE_PRIVILEGES.some((p) => privileges[p.key]);
 
 /**
- * Why the grids cannot be saved, or null when they can: a ticked database
- * with no privilege would become a GRANT of nothing, which the service refuses.
- * Every such database is named, with its server, so all of them can be fixed
- * in one pass.
+ * Why a database's recorded status rules out granting it, or null when it does
+ * not. A status the portal does not have (the list still loading) is not held
+ * against it: the service checks again and stays the backstop.
+ */
+export const whyNotGrantableStatus = (
+  status: string | null | undefined,
+): string | null => (status ? whyDatabaseUnavailable(status) : null);
+
+/**
+ * Why the grids cannot be saved, or null when they can. The service refuses the
+ * whole request if any ticked database has no privilege, which would be a GRANT
+ * of nothing, or is not active, which includes one the user already holds that
+ * has since gone moving, suspended or retired. Every such database is named,
+ * with its server, so all of them can be fixed in one pass.
  */
 export const whyPrivilegesIncomplete = (
   grids: DatabaseServerPrivilegeInfo[],
   servers: DatabaseServerInfoItem[],
   databases: DatabaseInfoItem[],
 ): string | null => {
-  const missing = grids.flatMap((grid) =>
-    grid.Databases.filter((d) => !hasGrantablePrivilege(d.Privileges)).map((d) => {
-      const database =
-        databases.find((x) => x.Id === d.DatabaseId)?.DatabaseName ??
-        `database ${d.DatabaseId}`;
-      const server =
-        servers.find((s) => s.Id === grid.ServerId)?.Name ?? `server ${grid.ServerId}`;
-      return `${database} on ${server}`;
+  const where = (serverId: number, databaseId: number) => {
+    const database =
+      databases.find((x) => x.Id === databaseId)?.DatabaseName ??
+      `database ${databaseId}`;
+    const server = servers.find((s) => s.Id === serverId)?.Name ?? `server ${serverId}`;
+    return `${database} on ${server}`;
+  };
+  const unavailable = grids.flatMap((grid) =>
+    grid.Databases.flatMap((d) => {
+      const reason = whyNotGrantableStatus(
+        databases.find((x) => x.Id === d.DatabaseId)?.Status,
+      );
+      return reason ? [`${where(grid.ServerId, d.DatabaseId)} (${reason})`] : [];
     }),
   );
-  return missing.length === 0
-    ? null
-    : `Pick at least one privilege for ${missing.join(", ")}, or untick it.`;
+  const missing = grids.flatMap((grid) =>
+    grid.Databases.filter((d) => !hasGrantablePrivilege(d.Privileges)).map((d) =>
+      where(grid.ServerId, d.DatabaseId),
+    ),
+  );
+  const problems = [
+    unavailable.length > 0
+      ? `Untick ${unavailable.join(", ")}: static users can only be granted an active database, and the service refuses the whole change otherwise.`
+      : null,
+    missing.length > 0
+      ? `Pick at least one privilege for ${missing.join(", ")}, or untick it.`
+      : null,
+  ].filter((p): p is string => p !== null);
+  return problems.length === 0 ? null : problems.join(" ");
 };
 
 /**

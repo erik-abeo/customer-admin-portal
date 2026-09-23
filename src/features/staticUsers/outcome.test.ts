@@ -6,7 +6,12 @@ import type {
   UpdateStaticDatabaseUserResponse,
 } from "@/api/types";
 
-import { generatedPassword, hasFailures, serverOutcomes } from "./outcome";
+import {
+  generatedPassword,
+  hasFailures,
+  refusedOutright,
+  serverOutcomes,
+} from "./outcome";
 
 const server = (overrides: Partial<ServerAccessInfo>): ServerAccessInfo => ({
   ServerId: 1,
@@ -82,5 +87,86 @@ describe("static user outcomes", () => {
     expect(hasFailures({ UserName: "x", Message: "Success", Servers: null })).toBe(
       false,
     );
+  });
+});
+
+describe("refusedOutright", () => {
+  const refusal =
+    "'tenant_stark' is suspended, so static users cannot be granted it until it is active again.";
+
+  it("reads a refusal from Message Refused, for create and update alike", () => {
+    const create = {
+      UserName: "",
+      Message: "Refused",
+      Servers: [
+        server({
+          Databases: [
+            {
+              DatabaseId: 105,
+              DatabaseName: null,
+              Description: null,
+              Privileges: null,
+              Errors: [refusal],
+            },
+          ],
+        }),
+      ],
+    } as unknown as CreateStaticDatabaseUserResponse;
+    expect(refusedOutright(create)).toEqual([refusal]);
+
+    const update = {
+      UserName: "static_wayne_reports",
+      Message: "Refused",
+      NewPassword: null,
+      Servers: [
+        {
+          ServerId: 3,
+          Errors: [],
+          Databases: [
+            {
+              DatabaseId: 105,
+              DatabaseName: null,
+              Privileges: null,
+              Errors: [refusal],
+            },
+          ],
+        },
+      ],
+    } as unknown as UpdateStaticDatabaseUserResponse;
+    expect(refusedOutright(update)).toEqual([refusal]);
+  });
+
+  it("treats Success and any other value as having gone ahead, an older Failure as partial", () => {
+    const partial = {
+      UserName: "static_wayne_reports",
+      Message: "Failure",
+      NewPassword: null,
+      Servers: [
+        {
+          ServerId: 3,
+          Errors: [],
+          Databases: [
+            {
+              DatabaseId: 105,
+              DatabaseName: null,
+              Privileges: null,
+              Errors: ["Failed to update privileges for database ID: 105"],
+            },
+          ],
+        },
+      ],
+    } as unknown as UpdateStaticDatabaseUserResponse;
+    expect(refusedOutright(partial)).toBeNull();
+    expect(hasFailures(partial)).toBe(true);
+
+    const done = {
+      ...partial,
+      Message: "Success",
+      Servers: [{ ServerId: 3, Errors: [], Databases: [] }],
+    };
+    expect(refusedOutright(done)).toBeNull();
+    expect(hasFailures(done)).toBe(false);
+    // Not "OK": only "Success" counts as everything applied.
+    expect(hasFailures({ ...done, Message: "OK" })).toBe(true);
   });
 });

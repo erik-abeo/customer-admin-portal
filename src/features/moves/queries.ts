@@ -138,7 +138,11 @@ export function useCreateCustomerMove() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: CreateCustomerMoveRequest) => movesApi.create(request),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => qc.invalidateQueries({ queryKey: KEYS.all }),
   });
 }
 
@@ -149,7 +153,7 @@ const invalidateMoveAndDatabases = (
   qc.invalidateQueries({ queryKey: KEYS.all });
   qc.invalidateQueries({ queryKey: KEYS.detail(id) });
   // Each of these repoints, restores or removes a database, so the registry
-  // and the capacity view are stale the moment they succeed.
+  // and the capacity view are stale once they finish, even when they fail.
   qc.invalidateQueries({ queryKey: ["databases"] });
   qc.invalidateQueries({ queryKey: ["server-capacity"] });
 };
@@ -158,7 +162,11 @@ export function useCancelCustomerMove() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => movesApi.cancel(id),
-    onSuccess: (_data, id) => invalidateMoveAndDatabases(qc, id),
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: (_data, _error, id) => invalidateMoveAndDatabases(qc, id),
   });
 }
 
@@ -166,7 +174,11 @@ export function useRollBackCustomerMove() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => movesApi.rollBack(id),
-    onSuccess: (_data, id) => invalidateMoveAndDatabases(qc, id),
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: (_data, _error, id) => invalidateMoveAndDatabases(qc, id),
   });
 }
 
@@ -174,7 +186,11 @@ export function useDropCustomerMoveSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => movesApi.dropSource(id),
-    onSuccess: (_data, id) => invalidateMoveAndDatabases(qc, id),
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: (_data, _error, id) => invalidateMoveAndDatabases(qc, id),
   });
 }
 

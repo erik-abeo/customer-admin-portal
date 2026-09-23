@@ -57,9 +57,12 @@ import { notifyError, notifySuccess } from "@/lib/notify";
 import {
   generatedPassword,
   hasFailures,
+  refusedOutright,
   serverOutcomes,
   type ServerOutcome,
 } from "@/features/staticUsers/outcome";
+
+type Refusal = { title: string; reasons: string[] };
 
 interface SecretReveal {
   title: string;
@@ -150,7 +153,12 @@ export function StaticUsersPage() {
     });
   };
 
-  const [createOpened, createCtl] = useDisclosure(false);
+  // A refusal is shown in the form it came from, and cleared when it closes.
+  const [createRefusal, setCreateRefusal] = useState<Refusal | null>(null);
+  const [editRefusal, setEditRefusal] = useState<Refusal | null>(null);
+  const [createOpened, createCtl] = useDisclosure(false, {
+    onClose: () => setCreateRefusal(null),
+  });
   const [editTarget, setEditTarget] =
     useState<GetStaticDatabaseUserDetailResponse | null>(null);
   const [editInitialServers, setEditInitialServers] = useState<
@@ -416,11 +424,21 @@ export function StaticUsersPage() {
           submitLabel="Create user"
           onCancel={createCtl.close}
           submitting={create.isPending}
+          refusal={createRefusal}
           onSubmit={async (payload) => {
             try {
+              setCreateRefusal(null);
               const res = (await create.mutateAsync(
                 payload as Parameters<typeof create.mutateAsync>[0],
               )) as CreateStaticDatabaseUserResponse;
+              // Refused outright: nothing exists and there is no password. The
+              // form stays open with its values so the refused databases can be
+              // fixed and the create sent again.
+              const refused = refusedOutright(res);
+              if (refused) {
+                setCreateRefusal({ title: "Nothing was created", reasons: refused });
+                return;
+              }
               createCtl.close();
               // Shown whether or not every server succeeded: the password is only
               // ever returned here, and the per-server list says what failed.
@@ -454,6 +472,7 @@ export function StaticUsersPage() {
         onClose={() => {
           setEditTarget(null);
           setEditInitialServers(null);
+          setEditRefusal(null);
         }}
         title={editTarget ? `Edit ${editTarget.UserName}` : "Edit"}
         size="xl"
@@ -468,13 +487,23 @@ export function StaticUsersPage() {
             onCancel={() => {
               setEditTarget(null);
               setEditInitialServers(null);
+              setEditRefusal(null);
             }}
             submitting={update.isPending}
+            refusal={editRefusal}
             onSubmit={async (payload) => {
               try {
+                setEditRefusal(null);
                 const res = (await update.mutateAsync(
                   payload as Parameters<typeof update.mutateAsync>[0],
                 )) as UpdateStaticDatabaseUserResponse;
+                // Refused outright: nothing changed, not even a requested
+                // password rotation, so the form stays open with its values.
+                const refused = refusedOutright(res);
+                if (refused) {
+                  setEditRefusal({ title: "Nothing was changed", reasons: refused });
+                  return;
+                }
                 setEditTarget(null);
                 setEditInitialServers(null);
                 const failed = hasFailures(res);

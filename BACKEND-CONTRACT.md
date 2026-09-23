@@ -84,6 +84,21 @@ error" on an unexpected failure. The SPA does not read the success body;
 failures surface through the HTTP status, and the error interceptor shows a
 string body as the message.
 
+**Known issue, pending confirmation of what is deployed: a successful user
+update or delete is reported as a failure.** `SupertokensService` calls
+`update-user` and `delete-user` on the SuperTokens backend at
+`Supertokens:ApiUrl`, and `UserManagementController` treats any answer whose
+`Status` is not `OK` as a refusal. The backend in this repository
+(`remote-database-system/GatewayServer/SupertokensFrontendAndBackend/backend/userRoutes.ts`)
+answers both with 200 `{"message": ...}` and no `status` field. Against it, the
+service returns 400 for an update or delete that SuperTokens has already
+applied, and skips its own step: an update's local record (static host,
+mappings, concurrent sessions) is not written, and a delete's local record is
+not removed. This predates this branch. The portal's behaviour is unchanged: it
+shows the 400 as a failure, which is then misleading, since the email, password
+or SuperTokens user has already changed or gone. Creating a user is not
+affected.
+
 ### 1.1 Database server probe
 
 `POST /My/probe-database-server` connects to a candidate server and reports what
@@ -328,10 +343,21 @@ N. Re-pick it under the server it is on."), is not `active` ("'name' is status,
 so static users cannot be granted it until it is active again."), or has no
 grantable privilege ticked ("No privilege is selected for 'name'. Select at
 least one, or remove the database."). If any is refused, the whole request is:
-the answer is 200 with `Message` `Failure` and `Servers` listing only the
+the answer is 200 with `Message` `Refused` and `Servers` listing only the
 refused databases, each with its error, and nothing is created, granted or
 revoked. A refused create has an empty `UserName`. The portal checks the
-no-privilege case itself before sending.
+no-privilege and not-active cases itself before sending.
+
+`Message` on create and update is therefore one of three values:
+
+- `Success`: everything applied. Only this value means that; not `OK`.
+- `Refused`: the up-front checks failed and nothing was created or changed.
+  The portal says "Nothing was created" or "Nothing was changed", lists the
+  refused databases, keeps the form open and shows no password.
+- `Failure`: the request went ahead and part of it failed; the per-server and
+  per-database `Errors` say which. The portal treats any value other than
+  `Success` and `Refused` as partial, so an older service's `Failure` for a
+  refusal is still reported as a failure.
 
 `GrantPrivilege` is unused. It stays on the wire for compatibility, but the
 service never grants `WITH GRANT OPTION`, always stores it as false and always

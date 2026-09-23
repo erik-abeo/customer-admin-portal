@@ -169,7 +169,7 @@ function whyNotGrantable(
 /**
  * Every requested database that may not be granted, as the service finds them
  * before it changes anything. Any at all refuses the whole request: the
- * response is a Failure listing only the refused databases, and nothing is
+ * response is "Refused", listing only the refused databases, and nothing is
  * created, granted or revoked.
  */
 function ungrantableServers(
@@ -1305,7 +1305,7 @@ const ROUTES: Route[] = [
       if (refused)
         return ok<CreateStaticDatabaseUserResponse>({
           UserName: "",
-          Message: "Failure",
+          Message: "Refused",
           Servers: refused.map((server) => ({
             ServerId: server.ServerId,
             ServerName: null,
@@ -1392,7 +1392,7 @@ const ROUTES: Route[] = [
       if (refused)
         return ok<UpdateStaticDatabaseUserResponse>({
           UserName: req.UserName,
-          Message: "Failure",
+          Message: "Refused",
           NewPassword: null,
           Servers: refused.map((server) => ({
             ServerId: server.ServerId,

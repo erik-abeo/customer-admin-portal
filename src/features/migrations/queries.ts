@@ -69,7 +69,11 @@ export function useCreateMigrationSession() {
     // MutationCache as soon as the page resets the mutation, rather than
     // lingering for the default five minutes.
     gcTime: 0,
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.all }),
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => qc.invalidateQueries({ queryKey: KEYS.all }),
   });
 }
 
@@ -77,7 +81,11 @@ export function useRevokeMigrationSession() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => migrationsApi.revoke(id),
-    onSuccess: (_data, id) => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: (_data, _error, id) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(id) });
     },
@@ -88,7 +96,11 @@ export function useDiscardMigrationTarget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => migrationsApi.discardTarget(id),
-    onSuccess: (_data, id) => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: (_data, _error, id) => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: KEYS.detail(id) });
       // The database registry changed too: discarding drops the registration

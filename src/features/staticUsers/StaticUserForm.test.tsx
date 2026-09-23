@@ -75,3 +75,31 @@ describe("StaticUserForm edit", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+describe("StaticUserForm refusal", () => {
+  it("shows why the service refused the last submit, keeping the form", () => {
+    render(
+      <MantineProvider theme={theme}>
+        <StaticUserForm
+          servers={[]}
+          databases={[]}
+          initial={initial}
+          initialServers={[{ ServerId: 1, Databases: [] }]}
+          submitLabel="Save changes"
+          onCancel={() => undefined}
+          onSubmit={vi.fn()}
+          refusal={{
+            title: "Nothing was changed",
+            reasons: [
+              "'tenant_stark' is suspended, so static users cannot be granted it until it is active again.",
+            ],
+          }}
+        />
+      </MantineProvider>,
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Nothing was changed");
+    expect(alert).toHaveTextContent("'tenant_stark' is suspended");
+    expect(screen.getByLabelText("Description")).toHaveValue("Read-only ETL");
+  });
+});

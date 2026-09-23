@@ -7,12 +7,12 @@ introducing a parallel one.
 
 ## Files
 
-| File                       | Purpose                                                                                                                                                                                                               |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nginx.conf`               | nginx site config used inside the container. SPA fallback, immutable asset caching, `/healthz`, security headers (included from `security-headers.conf`), gzip, and an optional `/api/` reverse proxy to the gateway. |
-| `security-headers.conf`    | CSP, HSTS, COOP, CORP, XCTO, X-Frame-Options, Referrer-Policy and Permissions-Policy. Included at server level and in every location that adds its own header, because nginx drops inherited headers in those.        |
-| `ecs-task-definition.json` | Hand-edit AWS ECS Fargate task definition (no Terraform required). Wires CloudWatch logs, `/healthz` ECS healthcheck, rootless user (uid 101).                                                                        |
-| `terraform/`               | Terraform skeleton (ECR + log group + IAM + task definition + ALB target group + ECS service). Reusable starting point; assumes a VPC + internal ALB + ECS cluster already exist.                                     |
+| File                       | Purpose                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `nginx.conf`               | nginx site config used inside the container. SPA fallback, immutable asset caching, `/healthz`, security headers (included from `security-headers.conf`), gzip, and the `/api/` reverse proxy to the gateway, which is required: the service does not enable CORS, so the SPA can only reach it on its own origin. |
+| `security-headers.conf`    | CSP, HSTS, COOP, CORP, XCTO, X-Frame-Options, Referrer-Policy and Permissions-Policy. Included at server level and in every location that adds its own header, because nginx drops inherited headers in those.                                                                                                     |
+| `ecs-task-definition.json` | Hand-edit AWS ECS Fargate task definition (no Terraform required). Wires CloudWatch logs, `/healthz` ECS healthcheck, rootless user (uid 101).                                                                                                                                                                     |
+| `terraform/`               | Terraform skeleton (ECR + log group + IAM + task definition + ALB target group + ECS service). Reusable starting point; assumes a VPC + internal ALB + ECS cluster already exist.                                                                                                                                  |
 
 ## Image build
 
@@ -40,8 +40,8 @@ the Dockerfile declares an `ARG` for each variable the SPA reads. Pass them with
 excluded from the build context, so build args are the only way in.
 
 ```bash
+# VITE_API_BASE_URL already defaults to /api, which the image's nginx proxies.
 docker build \
-  --build-arg VITE_API_BASE_URL=/api \
   --build-arg VITE_FEATURE_MIGRATIONS=true \
   --build-arg VITE_ENVIRONMENT=production \
   -t customer-admin-portal:local .
@@ -60,7 +60,7 @@ docker build \
 | `VITE_FEATURE_RBAC`          | `false`                 | Keep off. It gates write actions in the UI on an `X-Admin-Role` header the service does not send yet, so on it makes everyone read-only. It enforces nothing: the api-key grants full admin.                   |
 | `VITE_FEATURE_AUDIT_SINK`    | `false`                 | POSTs each admin write to `VITE_AUDIT_SINK_URL`.                                                                                                                                                               |
 | `VITE_AUDIT_SINK_URL`        | empty                   | The audit sink. It receives the admin API key on every POST, so it must be trusted like the API itself. On another origin, add it to `connect-src` in `security-headers.conf`, or the browser blocks the POST. |
-| `VITE_SENTRY_DSN`            | empty (off)             | Turns on Sentry error reporting. Add its ingest host to `connect-src` in `security-headers.conf`.                                                                                                              |
+| `VITE_SENTRY_DSN`            | empty (off)             | Turns on Sentry error reporting. `connect-src` already allows `https://*.ingest.sentry.io`; add the host only for a self-hosted or regional Sentry outside it.                                                 |
 | `VITE_IDLE_TIMEOUT_MINUTES`  | empty (`30`)            | Idle minutes before a forced sign-out; `0` disables it.                                                                                                                                                        |
 | `VITE_IDLE_WARN_MINUTES`     | empty (`1`)             | Minutes of warning before that sign-out.                                                                                                                                                                       |
 
@@ -102,7 +102,9 @@ The shipped `nginx.conf` enforces:
   explicitly disable it because enabling it can introduce XSS auditor
   side-channels)
 
-If you point the SPA at a different API origin, add it to `connect-src`.
+The SPA reaches the API only through the `/api/` proxy, on its own origin. If
+you change the gateway the proxy points at, change `connect-src` with it (see the
+comment in `nginx.conf`).
 
 ## Source maps and Sentry
 
@@ -146,12 +148,21 @@ Nothing in this repo does the upload today.
 
 The image holds no secrets. Every setting is compiled into the bundle at build
 time and is readable by anyone who can load the portal, so changing one, such as
-the Sentry DSN or the audit sink URL, means rebuilding the image with the new
-build arg and deploying it (`aws ecs update-service ... --force-new-deployment`
-once the new tag is pushed). Nothing set on the running task reaches the app.
+the Sentry DSN or the audit sink URL, means building and deploying a new image.
+Nothing set on the running task reaches the app.
 
-The session-scoped admin API key (entered at login) can be rotated by:
+`--force-new-deployment` alone does not do it: the ECR repository's tags are
+`IMMUTABLE` and the task definition pins `image_tag`, so it restarts the tasks
+on the old image. Instead:
 
-1. Issuing a new key via the backend.
-2. Telling each operator to sign out and sign back in. Old tabs continue
-   using the old key in `sessionStorage` until they're closed.
+1. Build the image with the new build arg and push it under a **new** tag.
+2. Point the task definition at it: set `image_tag` and `terraform apply`, or
+   register a new task-definition revision with the new image.
+3. Update the service to that revision (`terraform apply` does this; by hand,
+   `aws ecs update-service --task-definition <family>:<revision>`).
+
+The admin API key (entered at login) is a single `api-key` value in the
+service's configuration; there is no backend issuance. To rotate it, change that
+value and restart the service. Any open portal tab is signed out on its next API
+call, since the old key then gets a 401 and the portal signs out on any 401, and
+operators sign in again with the new key.

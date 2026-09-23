@@ -1,7 +1,9 @@
 import {
+  Alert,
   Button,
   Divider,
   Group,
+  List,
   Stack,
   Switch,
   Text,
@@ -42,6 +44,11 @@ interface StaticUserFormProps {
     payload: CreateStaticDatabaseUserRequest | UpdateStaticDatabaseUserRequest,
   ) => Promise<void> | void;
   submitting?: boolean;
+  /**
+   * Why the service refused the last submit outright, shown in the form so the
+   * operator can fix it without re-entering anything.
+   */
+  refusal?: { title: string; reasons: string[] } | null;
 }
 
 export function StaticUserForm({
@@ -53,6 +60,7 @@ export function StaticUserForm({
   onCancel,
   onSubmit,
   submitting,
+  refusal,
 }: StaticUserFormProps) {
   const isEdit = Boolean(initial);
 
@@ -178,6 +186,16 @@ export function StaticUserForm({
             </Text>
           )}
         </FormSection>
+
+        {refusal && (
+          <Alert color="red" variant="light" title={refusal.title} role="alert">
+            <List size="sm" spacing={2}>
+              {refusal.reasons.map((reason) => (
+                <List.Item key={reason}>{reason}</List.Item>
+              ))}
+            </List>
+          </Alert>
+        )}
 
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onCancel} disabled={submitting}>

@@ -39,7 +39,11 @@ export function useCreateAuthorizedUser() {
     // Its variables hold the user's password. With no cache time it leaves the
     // MutationCache once the page resets it on close, not five minutes later.
     gcTime: 0,
-    onSuccess: () => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: KEYS.all });
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
       // Authorized users per server and database are capacity inputs.
@@ -54,7 +58,11 @@ export function useUpdateAuthorizedUser() {
     mutationFn: (request: UpdateUserRequest) => authorizedUsersApi.update(request),
     // Its variables can hold a new password; see useCreateAuthorizedUser.
     gcTime: 0,
-    onSuccess: () => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
       // Authorized users per server and database are capacity inputs.
       qc.invalidateQueries({ queryKey: ["server-capacity"] });
@@ -66,7 +74,11 @@ export function useDeleteAuthorizedUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (userId: number | string) => authorizedUsersApi.remove(userId),
-    onSuccess: () => {
+    // On settled, not only on success: a request that fails can still have
+    // changed the server (a 500 after a partial write, a revoke whose login drop
+    // failed, a drop-source that failed after claiming the move), and the page
+    // should show what is there now rather than what was there before.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["authorized-users"] });
       // Authorized users per server and database are capacity inputs.
       qc.invalidateQueries({ queryKey: ["server-capacity"] });

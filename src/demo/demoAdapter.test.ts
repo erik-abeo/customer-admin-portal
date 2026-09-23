@@ -10,6 +10,8 @@ import type {
 
 import { emptyPrivileges } from "@/api/types";
 
+import { refusedOutright } from "@/features/staticUsers/outcome";
+
 import { demoAdapter } from "./demoAdapter";
 import { demoStore } from "./demoStore";
 
@@ -374,7 +376,7 @@ describe("demo static user updates, as the service applies them", () => {
         Servers: [{ ServerId: 3, Databases: [demoStore.staticUserPrivileges[4]![1]] }],
       });
       const data = res.data as UpdateStaticDatabaseUserResponse;
-      expect(data.Message).toBe("Failure");
+      expect(data.Message).toBe("Refused");
       expect(data.Servers![0]!.Databases).toEqual([
         expect.objectContaining({
           DatabaseId: 105,
@@ -419,7 +421,7 @@ describe("demo static user updates, as the service applies them", () => {
       ],
     });
     const data = res.data as UpdateStaticDatabaseUserResponse;
-    expect(data.Message).toBe("Failure");
+    expect(data.Message).toBe("Refused");
     expect(data.Servers![0]!.Databases![0]!.Errors).toEqual([
       "No privilege is selected for 'tenant_initech'. Select at least one, or remove the database.",
     ]);
@@ -451,7 +453,7 @@ describe("demo static user updates, as the service applies them", () => {
       ],
     });
     const data = res.data as CreateStaticDatabaseUserResponse;
-    expect(data.Message).toBe("Failure");
+    expect(data.Message).toBe("Refused");
     expect(data.UserName).toBe("");
     expect(data.Servers![0]!.Databases).toEqual([
       expect.objectContaining({
@@ -580,5 +582,40 @@ describe("demo mint refuses a second live key on a database", () => {
     } finally {
       demoStore.databases = demoStore.databases.filter((d) => d.Id !== 201);
     }
+  });
+});
+
+describe("demo static user refusals read as refusals", () => {
+  it("answers a refused create and update in the shape the portal detects", async () => {
+    const create = await call("post", "/create-static-database-user", {
+      UserPassword: null,
+      Description: null,
+      Servers: [
+        {
+          ServerId: 3,
+          Databases: [
+            {
+              DatabaseId: 105,
+              Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+            },
+          ],
+        },
+      ],
+    });
+    expect(refusedOutright(create.data as CreateStaticDatabaseUserResponse)).toEqual([
+      "'tenant_stark' is suspended, so static users cannot be granted it until it is active again.",
+    ]);
+
+    const update = await call("put", "/update-static-database-user", {
+      Id: 4,
+      UserName: "static_wayne_reports",
+      GenerateNewPassword: true,
+      NewDescription: null,
+      Servers: [{ ServerId: 3, Databases: demoStore.staticUserPrivileges[4] }],
+    });
+    const data = update.data as UpdateStaticDatabaseUserResponse;
+    expect(refusedOutright(data)).toHaveLength(1);
+    // Refused outright, so not even the rotation happened.
+    expect(data.NewPassword).toBeNull();
   });
 });

@@ -640,7 +640,10 @@ export interface ServerAccessInfo {
   Errors: string[] | null;
 }
 
-/** "Success" when nothing failed, "Failure" when any server or database did. */
+/**
+ * "Success" when everything applied, "Refused" when the up-front checks failed and
+ * nothing was created or changed, and "Failure" when it was partly applied.
+ */
 export interface CreateStaticDatabaseUserResponse {
   UserName: string;
   Message: string | null;
@@ -670,7 +673,10 @@ export interface ServerUpdateInfo {
   Errors: string[] | null;
 }
 
-/** "Success" when nothing failed, "Failure" when any server or database did. */
+/**
+ * "Success" when everything applied, "Refused" when the up-front checks failed and
+ * nothing was created or changed, and "Failure" when it was partly applied.
+ */
 export interface UpdateStaticDatabaseUserResponse {
   UserName: string;
   Message: string | null;

@@ -17,6 +17,14 @@ describe("scrubBreadcrumb", () => {
     expect(result.data?.["api-key"]).toBeUndefined();
   });
 
+  it("removes api-key from breadcrumb data in any casing, as scrubEvent does", () => {
+    const breadcrumb: Breadcrumb = {
+      category: "fetch",
+      data: { url: "/foo", "API-Key": "a", "Api-Key": "b", "api-key": "c" },
+    };
+    expect(scrubBreadcrumb(breadcrumb).data).toEqual({ url: "/foo" });
+  });
+
   it("removes api-key from fetch breadcrumb data", () => {
     const breadcrumb: Breadcrumb = {
       category: "fetch",

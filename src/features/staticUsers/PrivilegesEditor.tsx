@@ -22,7 +22,7 @@ import {
   emptyPrivileges,
 } from "@/api/types";
 
-import { GRANTABLE_PRIVILEGES } from "./privileges";
+import { GRANTABLE_PRIVILEGES, whyNotGrantableStatus } from "./privileges";
 
 interface PrivilegesEditorProps {
   servers: DatabaseServerInfoItem[];
@@ -150,20 +150,34 @@ export function PrivilegesEditor({
             ) : (
               <Stack gap="xs">
                 <Group gap="xs" wrap="wrap">
-                  {allDbs.map((db) => (
-                    <Checkbox
-                      key={db.Id}
-                      label={
-                        <Text span ff="monospace" size="sm">
-                          {db.DatabaseName}
-                        </Text>
-                      }
-                      checked={selectedDbIds.has(db.Id)}
-                      onChange={(e) =>
-                        toggleDatabase(entry.ServerId, db.Id, e.currentTarget.checked)
-                      }
-                    />
-                  ))}
+                  {allDbs.map((db) => {
+                    // The service refuses a database that is not active, and one
+                    // refusal refuses the whole request. An unticked one cannot be
+                    // picked; a ticked one stays untickable, since it has to be
+                    // removed before anything else here can be saved.
+                    const unavailable = whyNotGrantableStatus(db.Status);
+                    const selected = selectedDbIds.has(db.Id);
+                    return (
+                      <Checkbox
+                        key={db.Id}
+                        label={
+                          <Text span ff="monospace" size="sm">
+                            {db.DatabaseName}
+                            {unavailable && (
+                              <Text span c="dimmed" size="xs" ff="text">
+                                {` (unavailable: ${unavailable})`}
+                              </Text>
+                            )}
+                          </Text>
+                        }
+                        checked={selected}
+                        disabled={unavailable !== null && !selected}
+                        onChange={(e) =>
+                          toggleDatabase(entry.ServerId, db.Id, e.currentTarget.checked)
+                        }
+                      />
+                    );
+                  })}
                 </Group>
 
                 {entry.Databases.length > 0 && (
