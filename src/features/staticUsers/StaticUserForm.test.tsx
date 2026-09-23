@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { GetStaticDatabaseUserDetailResponse } from "@/api/types";
+import { emptyPrivileges, type GetStaticDatabaseUserDetailResponse } from "@/api/types";
 import { theme } from "@/theme";
 
 import { StaticUserForm } from "./StaticUserForm";
@@ -41,5 +41,37 @@ describe("StaticUserForm edit", () => {
       await screen.findByText(/Description cannot be cleared once set/),
     ).toBeInTheDocument();
     await waitFor(() => expect(onSubmit).not.toHaveBeenCalled());
+  });
+
+  it("refuses a ticked database with no privilege, and shows why", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <MantineProvider theme={theme}>
+        <StaticUserForm
+          servers={[{ Id: 1, Name: "east-1" } as never]}
+          databases={[
+            { Id: 100, DatabaseServerId: 1, DatabaseName: "tenant_acme" } as never,
+          ]}
+          initial={initial}
+          initialServers={[
+            {
+              ServerId: 1,
+              Databases: [{ DatabaseId: 100, Privileges: emptyPrivileges() }],
+            },
+          ]}
+          submitLabel="Save changes"
+          onCancel={() => undefined}
+          onSubmit={onSubmit}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.queryByRole("checkbox", { name: /^GRANT on/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Pick at least one privilege for tenant_acme on east-1, or untick it.",
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

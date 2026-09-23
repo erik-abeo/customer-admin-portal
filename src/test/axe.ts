@@ -21,8 +21,8 @@ export async function expectNoA11yViolations(
 ): Promise<void> {
   const results: AxeResults = await run(node, {
     // Disable color-contrast checks: happy-dom doesn't compute layout/colors
-    // accurately, so contrast is enforced separately by Playwright + a real
-    // browser in the E2E suite.
+    // accurately. Contrast is enforced in a real browser by the mocked
+    // Playwright suite (e2e/a11y.e2e.ts), in both color schemes.
     rules: {
       "color-contrast": { enabled: false },
       ...(options.rules ?? {}),

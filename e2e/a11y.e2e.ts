@@ -36,10 +36,6 @@ async function scan(page: Page, contextLabel: string) {
     // that produce false positives against Mantine's components.
     .withTags([...WCAG_TAGS, "best-practice"])
     .disableRules([
-      // Color contrast is enforced by Lighthouse on the login page where
-      // the brand button is the canonical primary CTA. axe occasionally
-      // double-reports decorative tinted icons in the dashboard tiles.
-      "color-contrast",
       // The login screen sits outside <main> intentionally; landmark
       // assertions on every page would be redundant with the AppLayout
       // tests.
@@ -127,4 +123,19 @@ test.describe("Accessibility (post-auth)", () => {
     ).toBeVisible();
     await scan(page, "Static DB users list");
   });
+
+  // The scheme follows the operator's system setting, and contrast differs
+  // between the two, so the pages with the most muted text are checked dark too.
+  for (const [path, heading] of [
+    ["/", /, Erik$/],
+    ["/database-servers", /Database servers/i],
+    ["/static-users", /Static database users/i],
+  ] as const) {
+    test(`${path} is accessible in the dark scheme`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.goto(path);
+      await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
+      await scan(page, `${path} (dark)`);
+    });
+  }
 });

@@ -111,22 +111,21 @@ describe("<RequireRole>", () => {
     expect(screen.getByTestId("b")).toBeDisabled();
   });
 
-  it("normalizes 'readonly' / 'read-only' to viewer", () => {
-    setRoleAct("readonly");
-    renderWithMantine(
-      <RequireRole role="admin">
-        <button data-testid="hidden">Delete</button>
-      </RequireRole>,
-    );
-    expect(screen.queryByTestId("hidden")).toBeNull();
-
-    setRoleAct("read-only");
-    renderWithMantine(
-      <RequireRole role="admin">
-        <button data-testid="hidden-2">Delete</button>
-      </RequireRole>,
-    );
-    expect(screen.queryByTestId("hidden-2")).toBeNull();
+  it("hides admin controls once 'readonly' or 'read-only' downgrades an admin", () => {
+    // From admin, so the control is visible first: starting from no role would
+    // hide it whatever the header did.
+    for (const header of ["readonly", "read-only"]) {
+      setRoleAct("admin");
+      const { unmount } = renderWithMantine(
+        <RequireRole role="admin">
+          <button data-testid="b">Delete</button>
+        </RequireRole>,
+      );
+      expect(screen.getByTestId("b")).toBeInTheDocument();
+      setRoleAct(header);
+      expect(screen.queryByTestId("b")).toBeNull();
+      unmount();
+    }
   });
 
   it("re-renders when the role changes (subscriber wiring)", () => {

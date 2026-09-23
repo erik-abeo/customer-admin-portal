@@ -4,7 +4,6 @@ import {
   Card,
   Container,
   Group,
-  Loader,
   Modal,
   SimpleGrid,
   Stack,
@@ -252,7 +251,14 @@ export function DatabaseServerDetailPage() {
         title="Edit server"
         size="lg"
       >
-        {!editServerQ.data && <Loader size="sm" aria-label="Loading server" />}
+        {/* A failed read shows why, with a retry, rather than loading forever. */}
+        {!editServerQ.data && (
+          <QueryStatus
+            isLoading={editServerQ.isLoading}
+            error={editServerQ.error}
+            onRetry={() => void editServerQ.refetch()}
+          />
+        )}
         {editServerQ.data && (
           <DatabaseServerForm
             initial={editServerQ.data}

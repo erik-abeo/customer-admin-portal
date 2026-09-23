@@ -53,6 +53,15 @@ export const canDropMoveSource = (move: CustomerMove): boolean =>
  * verifying or flipped, or settled by a source drop that has not finished. While
  * one does, the service refuses another move of the same database.
  */
+/**
+ * Whether a move result asks for work by hand. The service says so only in
+ * words: a cancel whose empty target could not be dropped succeeds with "needs
+ * dropping by hand", and one whose status restore failed fails with "Set the
+ * database's status back to active by hand".
+ */
+export const needsWorkByHand = (message: string | null | undefined): boolean =>
+  /by hand/i.test(message ?? "");
+
 export const isUnsettledMove = (move: CustomerMove): boolean =>
   ["planned", "draining", "copying", "verifying", "flipped"].includes(
     move.Status ?? "",

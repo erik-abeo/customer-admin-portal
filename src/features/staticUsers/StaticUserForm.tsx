@@ -23,6 +23,7 @@ import { FormSection } from "@/components/common/FormSection";
 import { composeValidators, maxLength, notClearable } from "@/lib/validators";
 
 import { PrivilegesEditor } from "./PrivilegesEditor";
+import { whyPrivilegesIncomplete, withoutGrantOption } from "./privileges";
 
 interface StaticUserFormValues {
   GenerateNewPassword: boolean;
@@ -69,10 +70,10 @@ export function StaticUserForm({
         maxLength(500, "Description"),
         notClearable("Description", initial?.Description),
       ),
-      Servers: (servers) =>
-        servers.length === 0
+      Servers: (grids) =>
+        grids.length === 0
           ? "Add at least one server with database privileges"
-          : null,
+          : whyPrivilegesIncomplete(grids, servers, databases),
     },
   });
 
@@ -83,7 +84,7 @@ export function StaticUserForm({
         UserName: initial.UserName,
         GenerateNewPassword: values.GenerateNewPassword,
         NewDescription: values.Description.trim() || null,
-        Servers: values.Servers,
+        Servers: withoutGrantOption(values.Servers),
       };
       await onSubmit(payload);
     } else {
@@ -92,7 +93,7 @@ export function StaticUserForm({
       const payload: CreateStaticDatabaseUserRequest = {
         UserPassword: null,
         Description: values.Description.trim() || null,
-        Servers: values.Servers,
+        Servers: withoutGrantOption(values.Servers),
       };
       await onSubmit(payload);
     }
@@ -171,6 +172,11 @@ export function StaticUserForm({
             onChange={(next) => form.setFieldValue("Servers", next)}
             lockServers={isEdit}
           />
+          {form.errors.Servers && (
+            <Text size="sm" c="red" role="alert">
+              {form.errors.Servers}
+            </Text>
+          )}
         </FormSection>
 
         <Group justify="flex-end" mt="sm">

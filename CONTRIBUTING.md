@@ -26,7 +26,7 @@ has been issued.
 | `npm run build`     | Production build (output in `dist/`)                              |
 | `npm run preview`   | Serve the production build locally                                |
 | `npm run lint`      | ESLint over the source tree                                       |
-| `npm run typecheck` | `tsc --noEmit` for `tsconfig.app.json`                            |
+| `npm run typecheck` | `tsc -b --noEmit` over the project references                     |
 | `npm run format`    | Apply Prettier formatting                                         |
 | `npm run test`      | Vitest unit + component tests                                     |
 | `npm run test:e2e`  | Playwright end-to-end tests (auto-starts a build via `e2e:serve`) |
@@ -48,7 +48,8 @@ src/
   styles/       Global CSS (theme tokens live in src/theme.ts)
   test/         Test setup + render helpers
 e2e/            Playwright suites + mock API helpers
-deploy/         Dockerfile, Nginx config, AWS / Terraform artifacts
+deploy/         nginx config, security headers, ECS task definition, Terraform
+Dockerfile      Multi-stage image build (at the repo root)
 ```
 
 ## Conventions

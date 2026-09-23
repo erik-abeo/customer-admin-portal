@@ -37,6 +37,7 @@ import {
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import {
   canCancelMove,
+  needsWorkByHand,
   canDropMoveSource,
   canRollBackMove,
   whyDatabaseNotMovable,
@@ -47,7 +48,7 @@ import {
   useDropCustomerMoveSource,
   useRollBackCustomerMove,
 } from "@/features/moves/queries";
-import { notifyError, notifySuccess } from "@/lib/notify";
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notify";
 
 const STATUS_COLOR: Record<string, string> = {
   planned: "blue",
@@ -209,7 +210,14 @@ export function MovesPage() {
       onConfirm: async () => {
         try {
           const result = await cancelMove.mutateAsync(move.Id);
-          if (result.Success) notifySuccess(result.Message ?? "Move cancelled.");
+          if (needsWorkByHand(result.Message))
+            notifyWarning(
+              result.Message!,
+              result.Success
+                ? "Move cancelled, cleanup needed"
+                : "Move cancelled, customer still offline",
+            );
+          else if (result.Success) notifySuccess(result.Message ?? "Move cancelled.");
           else notifyError(new Error(result.Message ?? "Could not cancel the move"));
         } catch (error) {
           notifyError(error);

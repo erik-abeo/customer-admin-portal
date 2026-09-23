@@ -50,6 +50,7 @@ import type {
   CreateUserRequest,
   DatabaseInfoItem,
   DatabasePrivilegeInfo,
+  DatabasePrivileges,
   DatabaseServerInfoItem,
   EventLogEntry,
   EventLogQueryResponse,
@@ -62,6 +63,7 @@ import type {
 } from "@/api/types";
 
 import { RELOCATION_REFUSED_MESSAGE } from "@/features/databases/editGuard";
+import { hasGrantablePrivilege } from "@/features/staticUsers/privileges";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import { isUnsettledMove } from "@/features/moves/queries";
 
@@ -90,7 +92,7 @@ interface RouteContext {
 interface HandlerResult {
   status?: number;
   data: unknown;
-  /** Optional response headers; X-Admin-Role is added automatically. */
+  /** Optional response headers. */
   headers?: Record<string, string>;
 }
 
@@ -144,17 +146,59 @@ const UNSETTLED_MOVES = new Set([
  */
 /**
  * Why a static user cannot be granted a database, in the service's words
- * (StaticDatabaseUserController.WhyNotGrantableAsync): it does not exist, or it
- * is not active. A refused database is reported in that database's Errors, is
- * not recorded, and makes the whole response a Failure.
+ * (StaticDatabaseUserController.WhyNotGrantableAsync): it does not exist, it is
+ * not on the server it was listed under, it is not active, or nothing
+ * grantable is ticked (GRANT does not count; it is never applied).
  */
-function whyNotGrantable(databaseId: number): string | null {
-  const database = demoStore.databases.find((d) => d.Id === databaseId);
-  if (!database) return `Database ID ${databaseId} does not exist.`;
+function whyNotGrantable(
+  serverId: number,
+  requested: DatabasePrivilegeInfo,
+): string | null {
+  const database = demoStore.databases.find((d) => d.Id === requested.DatabaseId);
+  if (!database) return `Database ID ${requested.DatabaseId} does not exist.`;
+  if (database.DatabaseServerId !== serverId)
+    return `'${database.DatabaseName}' is not on server ${serverId}. Re-pick it under the server it is on.`;
   const status = database.Status ?? "active";
   if (status.toLowerCase() !== "active")
     return `'${database.DatabaseName}' is ${status}, so static users cannot be granted it until it is active again.`;
+  if (!hasGrantablePrivilege(requested.Privileges))
+    return `No privilege is selected for '${database.DatabaseName}'. Select at least one, or remove the database.`;
   return null;
+}
+
+/**
+ * Every requested database that may not be granted, as the service finds them
+ * before it changes anything. Any at all refuses the whole request: the
+ * response is a Failure listing only the refused databases, and nothing is
+ * created, granted or revoked.
+ */
+function ungrantableServers(
+  grids: { ServerId: number; Databases: DatabasePrivilegeInfo[] }[],
+):
+  | {
+      ServerId: number;
+      Databases: {
+        DatabaseId: number;
+        Privileges: DatabasePrivileges;
+        Errors: string[];
+      }[];
+      Errors: string[];
+    }[]
+  | null {
+  let refused = false;
+  const servers = grids.map((grid) => ({
+    ServerId: grid.ServerId,
+    Errors: [] as string[],
+    Databases: grid.Databases.flatMap((d) => {
+      const refusal = whyNotGrantable(grid.ServerId, d);
+      if (!refusal) return [];
+      refused = true;
+      return [
+        { DatabaseId: d.DatabaseId, Privileges: d.Privileges, Errors: [refusal] },
+      ];
+    }),
+  }));
+  return refused ? servers : null;
 }
 
 function mintRefusal(req: CreateMigrationSessionRequest): string | null {
@@ -195,6 +239,19 @@ function mintRefusal(req: CreateMigrationSessionRequest): string | null {
   // progress shows as `moving`.
   if (database.Status !== "active")
     return `The selected database is ${database.Status}, so nothing may be migrated into it.`;
+  // One live key per database, as the service allows: none while another is
+  // redeemed, streaming, or pending and not yet expired.
+  const live = demoStore.migrationSessions.filter(
+    (s) =>
+      s.DatabaseId === database.Id &&
+      (s.Status === "redeemed" ||
+        s.Status === "streaming" ||
+        (s.Status === "pending" && Date.parse(s.ExpiresDateTimeUtc) > Date.now())),
+  );
+  if (live.length > 0)
+    return `The selected database already has a live migration key (${live
+      .map((s) => `session ${s.Id}, ${s.Status}`)
+      .join(", ")}). Revoke it first, or wait for it to finish.`;
   return null;
 }
 
@@ -950,12 +1007,21 @@ const ROUTES: Route[] = [
       const id = Number(params.id);
       const idx = demoStore.servers.findIndex((s) => s.Id === id);
       if (idx === -1) return notFound(`Database server ${id} not found`);
+      // The service has no delete endpoint yet. This follows the contract's
+      // spec for it (BACKEND-CONTRACT 2.1): refused with 409 while any
+      // database still references the server, never cascaded.
+      const onServer = demoStore.databases.filter((d) => d.DatabaseServerId === id);
+      if (onServer.length > 0)
+        return {
+          status: 409,
+          data: {
+            Success: false,
+            Message: `${onServer.length} database(s) are still registered on this server: ${onServer
+              .map((d) => d.DatabaseName)
+              .join(", ")}. Move or remove them first.`,
+          },
+        };
       const removed = demoStore.servers.splice(idx, 1)[0];
-      // Cascade: drop databases on that server (matches the warning copy
-      // shown in the Delete confirmation modal).
-      demoStore.databases = demoStore.databases.filter(
-        (d) => d.DatabaseServerId !== id,
-      );
       demoStore.recordAdminEvent(`Deleted database server ${removed.Name}`);
       return ok({ Success: true, Message: null });
     },
@@ -1050,6 +1116,22 @@ const ROUTES: Route[] = [
       const id = Number(params.id);
       const idx = demoStore.databases.findIndex((d) => d.Id === id);
       if (idx === -1) return notFound(`Database ${id} not found`);
+      // As the contract specifies the pending endpoint: refused with 409 while
+      // any authorized user or static user is still mapped to the database.
+      const userMappings = demoStore.authorizedUsers.filter((u) =>
+        u.DatabaseMappings.some((m) => m.DatabaseId === id),
+      ).length;
+      const staticPrivileges = Object.values(demoStore.staticUserPrivileges)
+        .flat()
+        .filter((p) => p.DatabaseId === id).length;
+      if (userMappings > 0 || staticPrivileges > 0)
+        return {
+          status: 409,
+          data: {
+            Success: false,
+            Message: `This database is still in use: ${userMappings} authorized user(s) and ${staticPrivileges} static user privilege(s) refer to it. Remove those first.`,
+          },
+        };
       const removed = demoStore.databases.splice(idx, 1)[0];
       demoStore.recordAdminEvent(`Deleted database ${removed.DatabaseName}`);
       return ok({ Success: true, Message: null });
@@ -1074,11 +1156,18 @@ const ROUTES: Route[] = [
     handle: ({ params }) => {
       const serverId = Number(params.serverId);
       const databaseId = Number(params.databaseId);
-      const filtered = demoStore.authorizedUsers.filter((u) =>
-        u.DatabaseMappings.some(
-          (m) => m.DatabaseServerId === serverId && m.DatabaseId === databaseId,
-        ),
-      );
+      // As the service answers it: each user carries only the mapping that
+      // was asked about, not every database they can reach.
+      const filtered = demoStore.authorizedUsers
+        .filter((u) =>
+          u.DatabaseMappings.some(
+            (m) => m.DatabaseServerId === serverId && m.DatabaseId === databaseId,
+          ),
+        )
+        .map((u) => ({
+          ...u,
+          DatabaseMappings: [{ DatabaseServerId: serverId, DatabaseId: databaseId }],
+        }));
       return ok({
         Success: true,
         Message: null,
@@ -1212,11 +1301,33 @@ const ROUTES: Route[] = [
     pattern: /^\/create-static-database-user$/,
     handle: ({ body }) => {
       const req = body as CreateStaticDatabaseUserRequest;
+      const refused = ungrantableServers(req.Servers);
+      if (refused)
+        return ok<CreateStaticDatabaseUserResponse>({
+          UserName: "",
+          Message: "Failure",
+          Servers: refused.map((server) => ({
+            ServerId: server.ServerId,
+            ServerName: null,
+            LocalServerAddress: null,
+            RemoteServerAddress: null,
+            ServerPort: null,
+            UserPassword: null,
+            Certificate: null,
+            Errors: server.Errors,
+            Databases: server.Databases.map((d) => ({
+              DatabaseId: d.DatabaseId,
+              DatabaseName: null,
+              Description: null,
+              Privileges: d.Privileges,
+              Errors: d.Errors,
+            })),
+          })),
+        });
       const userName = `static_demo_${Date.now().toString(36)}`;
       // The service generates the password and ignores any in the request.
       const password = "demo-generated-password";
       const results: CreateStaticDatabaseUserResponse["Servers"] = [];
-      let failed = false;
       for (const serverEntry of req.Servers) {
         const id = demoStore.staticUserIds.next();
         demoStore.staticUsers.push({
@@ -1227,13 +1338,11 @@ const ROUTES: Route[] = [
           CreatedDateTimeUtc: new Date().toISOString(),
           LastModifiedDateTimeUtc: new Date().toISOString(),
         });
-        // Carry the grantable part of the privilege grid over.
-        demoStore.staticUserPrivileges[id] = serverEntry.Databases.filter(
-          (d) => whyNotGrantable(d.DatabaseId) === null,
-        ).map(
+        // Carry the privilege grid over. GRANT is never stored as true.
+        demoStore.staticUserPrivileges[id] = serverEntry.Databases.map(
           (d): DatabasePrivilegeInfo => ({
             DatabaseId: d.DatabaseId,
-            Privileges: d.Privileges,
+            Privileges: { ...d.Privileges, GrantPrivilege: false },
           }),
         );
         const server = demoStore.servers.find((s) => s.Id === serverEntry.ServerId);
@@ -1247,14 +1356,12 @@ const ROUTES: Route[] = [
           Certificate: server?.Certificate ?? null,
           Databases: serverEntry.Databases.map((d) => {
             const db = demoStore.databases.find((x) => x.Id === d.DatabaseId);
-            const refusal = whyNotGrantable(d.DatabaseId);
-            if (refusal) failed = true;
             return {
               DatabaseId: d.DatabaseId,
-              DatabaseName: refusal ? null : (db?.DatabaseName ?? null),
-              Description: refusal ? null : (db?.Description ?? null),
+              DatabaseName: db?.DatabaseName ?? null,
+              Description: db?.Description ?? null,
               Privileges: d.Privileges,
-              Errors: refusal ? [refusal] : [],
+              Errors: [],
             };
           }),
           Errors: [],
@@ -1266,7 +1373,7 @@ const ROUTES: Route[] = [
       );
       const response: CreateStaticDatabaseUserResponse = {
         UserName: userName,
-        Message: failed ? "Failure" : "Success",
+        Message: "Success",
         Servers: results,
       };
       return ok(response);
@@ -1281,6 +1388,23 @@ const ROUTES: Route[] = [
       // this user across servers.
       const all = demoStore.staticUsers.filter((u) => u.UserName === req.UserName);
       if (all.length === 0) return notFound(`Static user ${req.UserName} not found`);
+      const refused = ungrantableServers(req.Servers);
+      if (refused)
+        return ok<UpdateStaticDatabaseUserResponse>({
+          UserName: req.UserName,
+          Message: "Failure",
+          NewPassword: null,
+          Servers: refused.map((server) => ({
+            ServerId: server.ServerId,
+            Errors: server.Errors,
+            Databases: server.Databases.map((d) => ({
+              DatabaseId: d.DatabaseId,
+              DatabaseName: null,
+              Privileges: d.Privileges,
+              Errors: d.Errors,
+            })),
+          })),
+        });
       const servers: UpdateStaticDatabaseUserResponse["Servers"] = [];
       let failed = false;
       for (const serverEntry of req.Servers) {
@@ -1301,24 +1425,13 @@ const ROUTES: Route[] = [
         row.LastModifiedDateTimeUtc = new Date().toISOString();
         // Per server, as the service does it: this server's grid replaces what
         // the user held on this server, so a database left out is revoked
-        // here. A requested database that cannot be granted is not recorded;
-        // whatever the user already held on it stays as it was.
-        const held = demoStore.staticUserPrivileges[row.Id] ?? [];
+        // here. Every entry was checked above; GRANT is never stored as true.
         const next: DatabasePrivilegeInfo[] = [];
         const databases = serverEntry.Databases.map((d) => {
-          const refusal = whyNotGrantable(d.DatabaseId);
-          if (refusal) {
-            failed = true;
-            const kept = held.find((h) => h.DatabaseId === d.DatabaseId);
-            if (kept) next.push(kept);
-            return {
-              DatabaseId: d.DatabaseId,
-              DatabaseName: null,
-              Privileges: d.Privileges,
-              Errors: [refusal],
-            };
-          }
-          next.push({ DatabaseId: d.DatabaseId, Privileges: d.Privileges });
+          next.push({
+            DatabaseId: d.DatabaseId,
+            Privileges: { ...d.Privileges, GrantPrivilege: false },
+          });
           return {
             DatabaseId: d.DatabaseId,
             DatabaseName:
@@ -1513,9 +1626,9 @@ function buildResponse(
   const status = result.status ?? 200;
   const headers = new AxiosHeaders();
   headers.set("content-type", "application/json");
-  // Default RBAC role for demo mode is full admin so every UI surface
-  // is reachable. Individual handlers can override via headers.
-  headers.set("x-admin-role", "admin");
+  // No X-Admin-Role: the service sends none, so the demo does not invent one.
+  // RBAC is off in .env.demo; turned on, every caller is a viewer, which is
+  // what a real build would show against today's service.
   if (result.headers) {
     for (const [k, v] of Object.entries(result.headers)) {
       headers.set(k, v as AxiosHeaderValue);

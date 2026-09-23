@@ -47,22 +47,22 @@ docker build \
   -t customer-admin-portal:local .
 ```
 
-| Build arg                    | Default                 | Effect                                                                                                  |
-| ---------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
-| `VITE_API_BASE_URL`          | `/api`                  | Where the SPA sends API calls. `/api` goes through this container's nginx proxy.                        |
-| `VITE_API_CONTROLLER_PREFIX` | `/My`                   | The route every API controller shares.                                                                  |
-| `VITE_APP_NAME`              | `Customer Admin Portal` | Name shown in the header and page titles.                                                               |
-| `VITE_ENVIRONMENT`           | empty (`development`)   | Environment label sent to Sentry.                                                                       |
-| `VITE_DEMO_MODE`             | `false`                 | Serves in-memory fixtures instead of calling the API. Never for a real deployment.                      |
-| `VITE_FEATURE_MIGRATIONS`    | `false`                 | Registers the Migrations, Capacity and Customer moves pages. Needs the API's migrations 001 to 011.     |
-| `VITE_FEATURE_EVENT_LOG`     | `false`                 | Shows the Event Log viewer. Needs the pending event-log endpoints.                                      |
-| `VITE_FEATURE_DELETES`       | `false`                 | Shows delete actions. Needs the pending delete endpoints.                                               |
-| `VITE_FEATURE_RBAC`          | `false`                 | Gates write actions on the `X-Admin-Role` response header. Off means everyone is an admin.              |
-| `VITE_FEATURE_AUDIT_SINK`    | `false`                 | POSTs each admin write to `VITE_AUDIT_SINK_URL`.                                                        |
-| `VITE_AUDIT_SINK_URL`        | empty                   | The audit sink. It receives the admin API key on every POST, so it must be trusted like the API itself. |
-| `VITE_SENTRY_DSN`            | empty (off)             | Turns on Sentry error reporting. Add its ingest host to `connect-src` in `security-headers.conf`.       |
-| `VITE_IDLE_TIMEOUT_MINUTES`  | empty (`30`)            | Idle minutes before a forced sign-out; `0` disables it.                                                 |
-| `VITE_IDLE_WARN_MINUTES`     | empty (`1`)             | Minutes of warning before that sign-out.                                                                |
+| Build arg                    | Default                 | Effect                                                                                                                                                                                                         |
+| ---------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`          | `/api`                  | Where the SPA sends API calls. `/api` goes through this container's nginx proxy.                                                                                                                               |
+| `VITE_API_CONTROLLER_PREFIX` | `/My`                   | The route every API controller shares.                                                                                                                                                                         |
+| `VITE_APP_NAME`              | `Customer Admin Portal` | Name shown in the header and page titles.                                                                                                                                                                      |
+| `VITE_ENVIRONMENT`           | empty (`development`)   | Environment label sent to Sentry.                                                                                                                                                                              |
+| `VITE_DEMO_MODE`             | `false`                 | Serves in-memory fixtures instead of calling the API. Never for a real deployment.                                                                                                                             |
+| `VITE_FEATURE_MIGRATIONS`    | `false`                 | Registers the Migrations, Capacity and Customer moves pages. Needs the API's migrations 001 to 011.                                                                                                            |
+| `VITE_FEATURE_EVENT_LOG`     | `false`                 | Shows the Event Log viewer. Needs the pending event-log endpoints.                                                                                                                                             |
+| `VITE_FEATURE_DELETES`       | `false`                 | Shows delete actions. Needs the pending delete endpoints.                                                                                                                                                      |
+| `VITE_FEATURE_RBAC`          | `false`                 | Keep off. It gates write actions in the UI on an `X-Admin-Role` header the service does not send yet, so on it makes everyone read-only. It enforces nothing: the api-key grants full admin.                   |
+| `VITE_FEATURE_AUDIT_SINK`    | `false`                 | POSTs each admin write to `VITE_AUDIT_SINK_URL`.                                                                                                                                                               |
+| `VITE_AUDIT_SINK_URL`        | empty                   | The audit sink. It receives the admin API key on every POST, so it must be trusted like the API itself. On another origin, add it to `connect-src` in `security-headers.conf`, or the browser blocks the POST. |
+| `VITE_SENTRY_DSN`            | empty (off)             | Turns on Sentry error reporting. Add its ingest host to `connect-src` in `security-headers.conf`.                                                                                                              |
+| `VITE_IDLE_TIMEOUT_MINUTES`  | empty (`30`)            | Idle minutes before a forced sign-out; `0` disables it.                                                                                                                                                        |
+| `VITE_IDLE_WARN_MINUTES`     | empty (`1`)             | Minutes of warning before that sign-out.                                                                                                                                                                       |
 
 None of these is a secret: whatever is baked in is readable by anyone who can
 load the bundle. The API key is **never** baked into the image; it is supplied
@@ -71,6 +71,18 @@ by the operator at the login screen and stored in `sessionStorage`.
 There is no runtime configuration. The container is nginx serving static
 files, so environment variables and Secrets Manager entries set on the task do
 not reach the SPA, and changing any value above means building a new image.
+
+## TLS and access
+
+The container serves plain HTTP on 8080. Terminate TLS at the load balancer in
+front of it; the HSTS and `upgrade-insecure-requests` headers assume the portal
+is only ever reached over HTTPS.
+
+The Terraform listener rule only forwards to the target group. It has no
+authentication action, so until you add one (Cognito, or your OIDC identity
+provider), anyone who can reach the ALB reaches the portal's login page, where
+the api-key is the only barrier. Add it as a deployment step; the choice of
+identity provider is yours, so it is not made in `main.tf`.
 
 ## Security headers
 
@@ -123,11 +135,12 @@ via `__APP_VERSION__` (which is read from `package.json`'s `version`
 field; see `vite.config.ts`). Sentry then matches a runtime stack trace
 to the uploaded maps via that release id and the chunk filename.
 
-If you want to embed Sentry source-map upload into the image build, do
-it in a separate CI job that runs `npm run build`, uploads maps, and
-then triggers `docker build --target runtime` with the pre-built `dist/`
-directory mounted in. The repo's `Dockerfile` already deletes maps so
-nothing extra is required to keep them out of the runtime container.
+The image cannot be built from a pre-built `dist/`: the runtime stage copies
+from the build stage, which builds the bundle itself and deletes the maps before
+the copy. So upload from a separate `npm run build` in CI, using the same
+source and the same `VITE_*` values as the image build, and check that the
+chunk file names in `dist/assets` match the image's before relying on them.
+Nothing in this repo does the upload today.
 
 ## Secret rotation
 

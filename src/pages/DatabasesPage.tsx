@@ -120,8 +120,9 @@ export function DatabasesPage() {
       centered: true,
       children: (
         <Text size="sm">
-          This permanently removes the database registration. Authorized-user mappings
-          to this database will be invalidated. This cannot be undone.
+          This permanently removes the database registration. It is refused while any
+          authorized user or static user is still mapped to the database; remove those
+          first. This cannot be undone.
         </Text>
       ),
       labels: { confirm: "Delete database", cancel: "Cancel" },

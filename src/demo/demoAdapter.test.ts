@@ -8,6 +8,8 @@ import type {
   UpdateStaticDatabaseUserResponse,
 } from "@/api/types";
 
+import { emptyPrivileges } from "@/api/types";
+
 import { demoAdapter } from "./demoAdapter";
 import { demoStore } from "./demoStore";
 
@@ -359,23 +361,27 @@ describe("demo static user updates, as the service applies them", () => {
     }
   });
 
-  it("refuses a database that is not active, in the service's words, and keeps the old grant", async () => {
+  it("refuses the whole update when any database is not active, and changes nothing", async () => {
     // static_wayne_reports (4) holds 104 and tenant_stark (105), which is suspended.
     const before = structuredClone(demoStore.staticUserPrivileges);
     try {
-      const held = demoStore.staticUserPrivileges[4]!;
       const res = await call("put", "/update-static-database-user", {
         Id: 4,
         UserName: "static_wayne_reports",
         GenerateNewPassword: false,
         NewDescription: null,
-        Servers: [{ ServerId: 3, Databases: held }],
+        // Drops 104's grant and asks again for 105: neither may happen.
+        Servers: [{ ServerId: 3, Databases: [demoStore.staticUserPrivileges[4]![1]] }],
       });
       const data = res.data as UpdateStaticDatabaseUserResponse;
       expect(data.Message).toBe("Failure");
-      const stark = data.Servers![0]!.Databases!.find((d) => d.DatabaseId === 105)!;
-      expect(stark.Errors).toEqual([
-        "'tenant_stark' is suspended, so static users cannot be granted it until it is active again.",
+      expect(data.Servers![0]!.Databases).toEqual([
+        expect.objectContaining({
+          DatabaseId: 105,
+          Errors: [
+            "'tenant_stark' is suspended, so static users cannot be granted it until it is active again.",
+          ],
+        }),
       ]);
       expect(privs(4)).toEqual([104, 105]);
     } finally {
@@ -383,19 +389,77 @@ describe("demo static user updates, as the service applies them", () => {
     }
   });
 
-  it("refuses a database that does not exist on create, and does not record it", async () => {
+  it("refuses a database with no grantable privilege, or listed under the wrong server", async () => {
+    const res = await call("put", "/update-static-database-user", {
+      Id: 2,
+      UserName: "static_initech_replica",
+      GenerateNewPassword: false,
+      NewDescription: null,
+      Servers: [
+        // tenant_initech (102) with only GRANT ticked, which is never applied.
+        {
+          ServerId: 1,
+          Databases: [
+            {
+              DatabaseId: 102,
+              Privileges: { ...emptyPrivileges(), GrantPrivilege: true },
+            },
+          ],
+        },
+        // tenant_umbrella (103) is on server 2, listed here under server 1's row.
+        {
+          ServerId: 2,
+          Databases: [
+            {
+              DatabaseId: 100,
+              Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+            },
+          ],
+        },
+      ],
+    });
+    const data = res.data as UpdateStaticDatabaseUserResponse;
+    expect(data.Message).toBe("Failure");
+    expect(data.Servers![0]!.Databases![0]!.Errors).toEqual([
+      "No privilege is selected for 'tenant_initech'. Select at least one, or remove the database.",
+    ]);
+    expect(data.Servers![1]!.Databases![0]!.Errors).toEqual([
+      "'tenant_acme' is not on server 2. Re-pick it under the server it is on.",
+    ]);
+    expect(privs(2)).toEqual([102]);
+  });
+
+  it("creates nothing when any requested database cannot be granted", async () => {
+    const users = demoStore.staticUsers.length;
     const res = await call("post", "/create-static-database-user", {
       UserPassword: null,
       Description: null,
-      Servers: [{ ServerId: 1, Databases: [{ DatabaseId: 999, Privileges: null }] }],
+      Servers: [
+        {
+          ServerId: 1,
+          Databases: [
+            {
+              DatabaseId: 101,
+              Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+            },
+            {
+              DatabaseId: 999,
+              Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+            },
+          ],
+        },
+      ],
     });
     const data = res.data as CreateStaticDatabaseUserResponse;
     expect(data.Message).toBe("Failure");
-    expect(data.Servers![0]!.Databases![0]!.Errors).toEqual([
-      "Database ID 999 does not exist.",
+    expect(data.UserName).toBe("");
+    expect(data.Servers![0]!.Databases).toEqual([
+      expect.objectContaining({
+        DatabaseId: 999,
+        Errors: ["Database ID 999 does not exist."],
+      }),
     ]);
-    const created = demoStore.staticUsers.find((u) => u.UserName === data.UserName)!;
-    expect(privs(created.Id)).toEqual([]);
+    expect(demoStore.staticUsers.length).toBe(users);
   });
 });
 
@@ -455,6 +519,66 @@ describe("demo database updates, as the service applies them", () => {
       );
     } finally {
       demoStore.databases.find((d) => d.Id === 105)!.Description = before;
+    }
+  });
+});
+
+describe("demo per-database user read", () => {
+  it("returns only the mapping asked about, as the service does", async () => {
+    const res = await call("get", "/get-users/1/100");
+    const users = (
+      res.data as { AuthorizedUserInfoList: { DatabaseMappings: unknown[] }[] }
+    ).AuthorizedUserInfoList;
+    expect(users.length).toBeGreaterThan(0);
+    for (const u of users)
+      expect(u.DatabaseMappings).toEqual([{ DatabaseServerId: 1, DatabaseId: 100 }]);
+  });
+});
+
+describe("demo deletes follow the contract's spec for the pending endpoints", () => {
+  it("refuses a server that still has databases, and keeps both", async () => {
+    const res = await call("delete", "/delete-database-server-info/1");
+    expect(res.status).toBe(409);
+    expect(messageOf(res.data)).toContain("still registered on this server");
+    expect(demoStore.servers.some((s) => s.Id === 1)).toBe(true);
+    expect(demoStore.databases.some((d) => d.DatabaseServerId === 1)).toBe(true);
+  });
+
+  it("refuses a database that users are still mapped to", async () => {
+    // tenant_acme (100) is mapped to authorized users and granted to static user 1.
+    const res = await call("delete", "/delete-database-info/100");
+    expect(res.status).toBe(409);
+    expect(messageOf(res.data)).toContain("still in use");
+    expect(demoStore.databases.some((d) => d.Id === 100)).toBe(true);
+  });
+});
+
+describe("demo mint refuses a second live key on a database", () => {
+  it("refuses while another key on it is streaming, in the service's words", async () => {
+    // Session 502 is streaming into database 201; register 201 for the check.
+    demoStore.databases.push({
+      Id: 201,
+      DatabaseServerId: 2,
+      DatabaseName: "easyopti_0887",
+      Description: null,
+      CrystalPmId: 887,
+      Status: "active",
+    });
+    try {
+      const res = await call("post", "/create-migration-session", {
+        DatabaseServerId: 2,
+        DatabaseId: 201,
+        DatabaseName: null,
+        CrystalPmId: 887,
+        CreatedByAdmin: "demo",
+        ExpiresInMinutes: 60,
+      });
+      expect(res.status).toBe(400);
+      expect(messageOf(res.data)).toBe(
+        "The selected database already has a live migration key (session 502, streaming). Revoke it first, or wait for it to finish.",
+      );
+    } finally {
+      demoStore.databases = demoStore.databases.filter((d) => d.Id !== 201);
     }
   });
 });

@@ -7,6 +7,7 @@ import {
   canDropMoveSource,
   canRollBackMove,
   isActiveMove,
+  needsWorkByHand,
   whyDatabaseNotMovable,
 } from "./queries";
 
@@ -132,5 +133,24 @@ describe("move status rules", () => {
     expect(canCancelMove("copying")).toBe(false);
     expect(canCancelMove("verifying")).toBe(false);
     expect(canCancelMove(null)).toBe(false);
+  });
+});
+
+describe("needsWorkByHand", () => {
+  it("spots the cancel results that ask for manual cleanup", () => {
+    expect(
+      needsWorkByHand(
+        "Move cancelled. The customer is back online on the source. The empty database 'x' it reserved on the target server could not be removed and needs dropping by hand.",
+      ),
+    ).toBe(true);
+    expect(
+      needsWorkByHand(
+        "The move was cancelled, but the customer could not be put back online. Set the database's status back to active by hand.",
+      ),
+    ).toBe(true);
+    expect(
+      needsWorkByHand("Move cancelled. The customer is back online on the source."),
+    ).toBe(false);
+    expect(needsWorkByHand(null)).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { databaseServersApi } from "@/api/databaseServers";
 import type { DatabaseServerInfoItem, ProbeDatabaseServerResponse } from "@/api/types";
+import { notifyError } from "@/lib/notify";
 import { theme } from "@/theme";
 
 import { DatabaseServerForm } from "./DatabaseServerForm";
@@ -19,6 +20,8 @@ vi.mock("@/api/databaseServers", () => ({
     probe: vi.fn(),
   },
 }));
+
+vi.mock("@/lib/notify", () => ({ notifyError: vi.fn(), notifySuccess: vi.fn() }));
 
 const PEM = "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----";
 
@@ -163,6 +166,33 @@ describe("DatabaseServerForm", () => {
         Password: "Stored-Pass-1!",
         SslMode: "VerifyCA",
       }),
+    );
+  });
+
+  it("refuses to clear the stored certificate, which the service would keep", async () => {
+    const { onSubmit } = renderForm(stored);
+
+    type(/^Certificate \(PEM\)/, "");
+    fireEvent.click(submitButton("Save changes"));
+
+    expect(
+      await screen.findByText(/Certificate cannot be cleared once set/),
+    ).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("reports a probe request that failed outright", async () => {
+    const failure = new Error("Network Error");
+    vi.mocked(databaseServersApi.probe).mockRejectedValue(failure);
+    renderForm();
+
+    type(/^Name/, "db-east-1");
+    type(/^Local server address/, "db-east-1.internal");
+    type(/^Administrator password/, "Str0ng-Passw0rd!");
+    fireEvent.click(screen.getByRole("button", { name: /Test connection/ }));
+
+    await waitFor(() =>
+      expect(notifyError).toHaveBeenCalledWith(failure, "Probe failed"),
     );
   });
 });

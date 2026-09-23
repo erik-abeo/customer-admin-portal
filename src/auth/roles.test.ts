@@ -4,7 +4,13 @@ vi.mock("@/config/env", () => ({
   features: { rbac: true },
 }));
 
-import { canWrite, getCurrentRole, setCurrentRole, subscribeRole } from "./roles";
+import {
+  canWrite,
+  getCurrentRole,
+  normalizeRole,
+  setCurrentRole,
+  subscribeRole,
+} from "./roles";
 
 describe("RBAC roles store", () => {
   afterEach(() => {
@@ -25,13 +31,25 @@ describe("RBAC roles store", () => {
     expect(getCurrentRole()).toBe("admin");
   });
 
-  it("treats 'readonly', 'read-only', 'viewer' all as viewer", () => {
-    setCurrentRole("readonly");
-    expect(getCurrentRole()).toBe("viewer");
-    setCurrentRole("read-only");
-    expect(getCurrentRole()).toBe("viewer");
-    setCurrentRole("viewer");
-    expect(getCurrentRole()).toBe("viewer");
+  it("downgrades an admin to viewer on 'readonly', 'read-only' or 'viewer'", () => {
+    // From admin each time: starting from no role would read viewer whatever
+    // the header did, since no role is viewer too.
+    for (const header of ["readonly", "read-only", "viewer", "Read-Only"]) {
+      setCurrentRole("admin");
+      expect(getCurrentRole()).toBe("admin");
+      setCurrentRole(header);
+      expect(getCurrentRole()).toBe("viewer");
+    }
+  });
+
+  it("recognizes the viewer aliases, rather than falling back on them as unknown", () => {
+    // Unknown strings also resolve to viewer, so the store alone cannot tell
+    // the two apart; the normalizer can.
+    expect(normalizeRole("readonly")).toBe("viewer");
+    expect(normalizeRole("read-only")).toBe("viewer");
+    expect(normalizeRole("viewer")).toBe("viewer");
+    expect(normalizeRole("totally-made-up")).toBeNull();
+    expect(normalizeRole(null)).toBeNull();
   });
 
   it("falls back to viewer for unknown role strings (when RBAC on)", () => {

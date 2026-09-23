@@ -16,7 +16,11 @@ import { Link, useParams } from "react-router-dom";
 
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
-import { useAuthorizedUsersForDatabase } from "@/features/authorizedUsers/queries";
+import { otherDatabaseCount } from "@/features/authorizedUsers/otherAccess";
+import {
+  useAuthorizedUsers,
+  useAuthorizedUsersForDatabase,
+} from "@/features/authorizedUsers/queries";
 import { useDatabaseServer } from "@/features/databaseServers/queries";
 import { useDatabase } from "@/features/databases/queries";
 import {
@@ -60,6 +64,9 @@ export function DatabaseDetailPage() {
     database?.DatabaseServerId,
     database?.Id,
   );
+  // The per-database read carries only this database's mapping, so the count of
+  // a user's other databases comes from the full list.
+  const allUsers = useAuthorizedUsers();
 
   if (databaseId === undefined || Number.isNaN(databaseId)) {
     return (
@@ -177,7 +184,11 @@ export function DatabaseDetailPage() {
               </Table.Thead>
               <Table.Tbody>
                 {(authorized.data ?? []).map((u) => {
-                  const otherCount = Math.max(0, (u.DatabaseMappings?.length ?? 0) - 1);
+                  const otherCount = otherDatabaseCount(
+                    u.Id,
+                    databaseId,
+                    allUsers.data,
+                  );
                   return (
                     <Table.Tr key={u.Id}>
                       <Table.Td>
@@ -200,12 +211,18 @@ export function DatabaseDetailPage() {
                         )}
                       </Table.Td>
                       <Table.Td>
-                        <Badge
-                          variant="light"
-                          color={otherCount > 0 ? "crystal" : "gray"}
-                        >
-                          {otherCount} other
-                        </Badge>
+                        {otherCount === null ? (
+                          <Text size="sm" c="dimmed">
+                            {allUsers.isError ? "Unknown" : "Loading"}
+                          </Text>
+                        ) : (
+                          <Badge
+                            variant="light"
+                            color={otherCount > 0 ? "crystal" : "gray"}
+                          >
+                            {otherCount} other
+                          </Badge>
+                        )}
                       </Table.Td>
                     </Table.Tr>
                   );

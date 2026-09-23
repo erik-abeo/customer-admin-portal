@@ -21,10 +21,10 @@ only ever talks to one origin.
 | Database servers | List, create, edit (name, description, address, one port, admin username and password, a required SSL CA, the AWS security group), detail view of associated databases. A new server, or an edit that changes its connection, is saved only after "Test connection" passes (an edit can be saved anyway, explicitly). Optional delete (feature-flagged + RBAC).                                            |
 | Databases        | List, create, edit, filter by server. Drill-down detail view shows authorized users for the database. Optional delete (feature-flagged + RBAC).                                                                                                                                                                                                                                                            |
 | Authorized users | List, create, edit, delete, CSV export. Search by email; filter by host restriction (any vs static-only) and by whether the user has any mappings. Inline picker for which databases each Supertokens user can access. URL-driven email filter so deep links from the database detail page survive a refresh.                                                                                              |
-| Static DB users  | List (grouped by username across servers), create, edit, password rotation, per-server / per-database privilege matrix (SELECT/INSERT/UPDATE/DELETE/CREATE/DROP/GRANT/ALL), one-time secret-reveal modal for new passwords. Optional delete (feature-flagged + RBAC).                                                                                                                                      |
+| Static DB users  | List (grouped by username across servers), create, edit, password rotation, per-server / per-database privilege matrix (ALL/SELECT/INSERT/UPDATE/DELETE/CREATE/DROP; at least one per database), one-time secret-reveal modal for new passwords. Optional delete (feature-flagged + RBAC).                                                                                                                 |
 | Event log        | Full UI when `VITE_FEATURE_EVENT_LOG=true`: filter by user / IP / server / database / date range / event type, paginated query with `keepPreviousData` for smooth navigation, expandable row details, CSV export with client-side fallback. When the flag is off the page renders a documented placeholder. See [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md#23-event-log-gated-by-vite_feature_event_log). |
 | Remote databases | Gated by `VITE_FEATURE_MIGRATIONS` (off by default; needs the API's migrations 001 to 011). Migrations: mint a one-time key for a customer's streaming migration, watch it run, revoke it, discard a failed target. Capacity: how full each server is, its trend, and whether it takes new customers. Customer moves: plan, watch, cancel, roll back and settle a move between servers.                    |
-| RBAC             | Optional, gated by `VITE_FEATURE_RBAC`. The portal reads the `X-Admin-Role` response header on every API call (`admin`, or `viewer`, `readonly` or `read-only`) and gates write actions accordingly. When the flag is off, all callers are treated as admins; when it is on, a caller is a viewer until the header says otherwise.                                                                         |
+| RBAC             | UI-only, gated by `VITE_FEATURE_RBAC`, and to stay off for now: the service sends no `X-Admin-Role` header and has no roles, so the api-key grants full admin. When on, the portal reads the header on every API call (`admin`, or `viewer`, `readonly` or `read-only`) and gates write actions accordingly, and a caller is a viewer until the header says otherwise. It enforces nothing on the server.  |
 | Observability    | Opt-in Sentry (`VITE_SENTRY_DSN`) with `api-key` header scrubbing. Opt-in audit-log POST sink (`VITE_FEATURE_AUDIT_SINK` + `VITE_AUDIT_SINK_URL`) that mirrors the in-memory ring buffer to a backend endpoint of your choice.                                                                                                                                                                             |
 | Theming & UX     | CrystalPM-branded header, login, favicon, and loading splash. Light/dark color scheme toggle. Glass-morphism login + header. Mobile-responsive `AppShell`. Code-split routes. Cmd/Ctrl+K command palette. Initial loading splash rendered before React mounts.                                                                                                                                             |
 
@@ -44,8 +44,8 @@ only ever talks to one origin.
 ## Prerequisites
 
 - **Node.js 22.13+** (pinned in `.nvmrc`). The Dockerfile uses Node 22.
-- Network access to the ASP.NET service (for local development, its own URL,
-  such as `https://localhost:5001`).
+- For anything beyond demo mode, the ASP.NET service reachable on the portal's
+  own origin (see "Local development" below).
 
 ## Local development
 
@@ -58,6 +58,14 @@ npm run dev
 Open <http://localhost:5173>. You will be sent to the login screen on first
 load. Enter your admin name and the API key (the value of the `api-key`
 setting in `ClientRemoteDatabaseAccessAPI`'s `appsettings.json`).
+
+`npm run dev` has no proxy (`vite.config.ts` defines none), and the service does
+not enable CORS, so pointing `VITE_API_BASE_URL` at the API on another origin,
+such as `https://localhost:5001`, gets every call blocked by the browser. What
+works: demo mode (below), which needs no API; putting the portal and the API
+behind one origin yourself, for example with a local reverse proxy; or the live
+suite (`npm run test:e2e:live`), whose `vite.live.config.ts` serves the build
+with a `/My` proxy to a real API it starts.
 
 ### Demo mode (no backend required)
 
@@ -81,12 +89,12 @@ fixtures. Implementation lives in [`src/demo/`](./src/demo/); start at
 
 ### Build-time environment variables
 
-| Variable                     | Required | Description                                                                                                                                                                                                                                                                 |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VITE_API_BASE_URL`          | yes      | Where API calls go (no trailing slash). `/api` in production, proxied by this app's nginx; `https://localhost:5001` for local IIS Express. The service does not enable CORS, so a different origin only works in development through Vite's proxy or a same-origin gateway. |
-| `VITE_API_CONTROLLER_PREFIX` | no       | Defaults to `/My`, the route every `ClientRemoteDatabaseAccessAPI` controller shares.                                                                                                                                                                                       |
-| `VITE_APP_NAME`              | no       | Branding / window title. Defaults to `Customer Admin Portal`.                                                                                                                                                                                                               |
-| `VITE_FEATURE_MIGRATIONS`    | no       | `true` routes the Migrations, Capacity and Customer moves pages. Off by default. Needs the backend's migrations 001 to 011.                                                                                                                                                 |
+| Variable                     | Required | Description                                                                                                                                                                                                                         |
+| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`          | yes      | Where API calls go (no trailing slash). `/api` in production, proxied by this app's nginx. The service does not enable CORS, so it must resolve to the portal's own origin; see "Local development" for running against a real API. |
+| `VITE_API_CONTROLLER_PREFIX` | no       | Defaults to `/My`, the route every `ClientRemoteDatabaseAccessAPI` controller shares.                                                                                                                                               |
+| `VITE_APP_NAME`              | no       | Branding / window title. Defaults to `Customer Admin Portal`.                                                                                                                                                                       |
+| `VITE_FEATURE_MIGRATIONS`    | no       | `true` routes the Migrations, Capacity and Customer moves pages. Off by default. Needs the backend's migrations 001 to 011.                                                                                                         |
 
 Every other variable, and its default, is in `.env.example` and in the build-arg
 table in [deploy/README.md](./deploy/README.md).
@@ -98,8 +106,9 @@ The API key is **not** a build-time variable; see below.
 ### Today (interim: static API key, runtime-supplied)
 
 All management endpoints on `ClientRemoteDatabaseAccessAPI` are currently
-protected by a static `api-key` HTTP header (see
-`APIKeyAuthenticationMiddleware`).
+protected by a static `api-key` HTTP header: the `[ApiKeyAuthentication]`
+attribute (`ApiKeyAuthenticationAttribute`), which delegates to
+`APIKeyAuthenticationMiddleware`.
 
 The portal handles this without baking the key into the bundle:
 
@@ -303,8 +312,11 @@ docker run --rm -p 8080:8080 customer-admin-portal:latest
 
 When the SPA is configured with `VITE_API_BASE_URL=/api`, the included
 `deploy/nginx.conf` proxies `/api/*` to the ASP.NET service. This avoids
-CORS entirely and lets you serve everything from a single origin. Edit the
-`proxy_pass` line to point at your gateway server.
+CORS entirely and lets you serve everything from a single origin. To point it at
+another gateway, change three things together and rebuild: `proxy_pass` and
+`proxy_ssl_name` in `deploy/nginx.conf`, and `connect-src` in
+`deploy/security-headers.conf`. The proxy verifies the gateway's certificate
+against the image's CA bundle.
 
 `deploy/nginx.conf` also ships:
 
@@ -325,9 +337,13 @@ Two flavors:
 
 1. Build and push the Docker image to ECR.
 2. Run on ECS Fargate (or EC2) behind an internal ALB.
-3. Use an ALB authentication action (Cognito user pool or OIDC IdP) so a
-   browser can't reach the SPA without first authenticating to your IdP.
-4. The container's `/api/*` proxy reaches the gateway server over your VPC.
+3. Terminate TLS at the ALB: the container serves plain HTTP on 8080.
+4. **Add an authentication action to the listener rule yourself.** The
+   Terraform in `deploy/terraform/` creates a rule that only forwards, so until
+   you add one (Cognito user pool or an OIDC IdP), anyone who can reach the ALB
+   reaches the portal's login page. Which identity provider to use is a
+   decision for your environment, so it is not made here.
+5. The container's `/api/*` proxy reaches the gateway server over your VPC.
 
 ### Static (S3 + CloudFront): not supported yet
 
@@ -355,7 +371,7 @@ jobs that must all pass before the Docker image is built:
 
 | Job          | What it runs                                                                                                                                                                                                                                                                                                                                                   |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`      | `format:check`, `lint` (`--max-warnings=0`), `typecheck`, `npm test`, `npm run build`, in order. Uploads `dist/` as an artifact.                                                                                                                                                                                                                               |
+| `build`      | `npm audit --omit=dev --audit-level=high` (fails on a high or critical advisory in a production dependency), then `format:check`, `lint` (`--max-warnings=0`), `typecheck`, `npm test`, `npm run build`, in order. Uploads `dist/` as an artifact.                                                                                                             |
 | `e2e`        | Installs Chromium and runs `npm run test:e2e` against the production bundle (built in test mode). Uploads the HTML report on every run; on failure also uploads `test-results/` (traces, screenshots, videos).                                                                                                                                                 |
 | `lighthouse` | Runs `npx lhci autorun` against `http://127.0.0.1:4173/login` three times and asserts the budget in [`lighthouserc.json`](./lighthouserc.json): Performance >= 0.9, Accessibility >= 0.95, Best-practices >= 0.9, CLS <= 0.1, plus per-metric warnings on FCP/LCP/TBT/Speed Index/TTI. Median report URL appears in the job log; full reports are an artifact. |
 | `docker`     | On `main` only, builds the runtime image. Waits on **all three** quality jobs above. No push by default; wire up an ECR `docker/login-action` step when you're ready.                                                                                                                                                                                          |

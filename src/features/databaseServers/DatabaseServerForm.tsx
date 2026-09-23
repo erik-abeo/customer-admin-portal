@@ -36,6 +36,7 @@ import type {
   UpdateDatabaseServerInfoRequest,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
+import { notifyError } from "@/lib/notify";
 import { useProbeDatabaseServer } from "@/features/databaseServers/queries";
 import {
   canSubmitServer,
@@ -129,11 +130,13 @@ export function DatabaseServerForm({
       },
       // The API needs a CA certificate to administer the server at all, and refuses to
       // register one without it. Asked for here so the operator hears it from the form,
-      // not from a validation error after submitting. Edit mode sends the stored one back.
+      // not from a validation error after submitting. On edit the field is prefilled
+      // with the stored one, and a blank is sent as "keep", so clearing it would
+      // report success and leave the old certificate: it cannot be cleared.
       Certificate: (v) =>
         !isEdit && v.trim().length === 0
           ? "A CA certificate is required. For RDS, use the AWS global bundle."
-          : null,
+          : notClearable("Certificate", initial?.Certificate)(v),
     },
   });
 
@@ -187,10 +190,12 @@ export function DatabaseServerForm({
         CertificatePem: connection.CertificatePem || null,
       });
       setProbed({ for: inputs, result });
-    } catch {
+    } catch (e) {
       // An unreachable or unsuitable server is reported in the body, so reaching
-      // here means the request itself failed. The global handler has already
-      // raised that; clearing the panel avoids showing a stale pass.
+      // here means the request itself failed (the API was unreachable, the key
+      // was refused, or it answered 500). Nothing else reports it, so it is
+      // shown here, and the panel is cleared so a stale pass is not left up.
+      notifyError(e, "Probe failed");
       setProbed(null);
     }
   };

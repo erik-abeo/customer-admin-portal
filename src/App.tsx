@@ -30,7 +30,7 @@ import { installAuditLog } from "@/lib/auditLog";
 import { installAuditSink } from "@/lib/auditSink";
 import { MutationProgress } from "@/lib/mutationProgress";
 import { initSentry, setSentryUser } from "@/lib/sentry";
-import { theme } from "@/theme";
+import { cssVariablesResolver, theme } from "@/theme";
 
 // Initialize Sentry before React renders so any startup error is captured.
 // No-op when VITE_SENTRY_DSN isn't set.
@@ -233,7 +233,11 @@ export function App() {
 
   return (
     <RootErrorBoundary>
-      <MantineProvider theme={theme} defaultColorScheme="auto">
+      <MantineProvider
+        theme={theme}
+        cssVariablesResolver={cssVariablesResolver}
+        defaultColorScheme="auto"
+      >
         <ModalsProvider>
           <NavigationProgress
             color="crystal"

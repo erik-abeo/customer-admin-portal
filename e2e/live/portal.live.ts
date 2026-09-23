@@ -73,6 +73,8 @@ async function scan(
   label: string,
   options: { modalOpen?: boolean } = {},
 ): Promise<void> {
+  // Contrast is checked by the mocked suite (e2e/a11y.e2e.ts) in both schemes;
+  // this one checks the real service's data renders accessibly.
   const disabled = ["color-contrast", "landmark-one-main", "region"];
   if (options.modalOpen) {
     // Mantine renders a modal's title bar as a <header>, which axe counts as a

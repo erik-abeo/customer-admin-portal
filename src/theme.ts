@@ -14,6 +14,7 @@ import {
   TextInput,
   Title,
   createTheme,
+  type CSSVariablesResolver,
   rem,
 } from "@mantine/core";
 
@@ -53,6 +54,28 @@ const slate: MantineColorsTuple = [
   "#484e5d",
   "#2f3340",
 ];
+
+/**
+ * Muted text in the light scheme. Mantine's default for `dimmed` and for the
+ * gray light badge's label is gray 6 (#868e96), which is 3.0 to 3.3:1 on the
+ * portal's white and near-white surfaces: below the 4.5:1 WCAG AA needs for
+ * body-size text, which axe flagged on every page. Gray 7 is about 8:1.
+ *
+ * The dark scheme had the same problem the other way round: dimmed text
+ * (dark 2, #828282) was 3.5:1 on the dark card surface and links (crystal 4)
+ * 4.3:1. Dark 1 and crystal 3 are about 6.9:1 and 5.7:1.
+ */
+export const cssVariablesResolver: CSSVariablesResolver = () => ({
+  variables: {},
+  light: {
+    "--mantine-color-dimmed": "var(--mantine-color-gray-7)",
+    "--mantine-color-gray-light-color": "var(--mantine-color-gray-7)",
+  },
+  dark: {
+    "--mantine-color-dimmed": "var(--mantine-color-dark-1)",
+    "--mantine-color-anchor": "var(--mantine-color-crystal-3)",
+  },
+});
 
 export const theme = createTheme({
   primaryColor: "crystal",
@@ -192,13 +215,14 @@ export const theme = createTheme({
         verticalSpacing: "sm",
         horizontalSpacing: "md",
       },
-      styles: (mantineTheme) => ({
+      styles: () => ({
         th: {
           fontWeight: 600,
           fontSize: rem(12),
           textTransform: "uppercase",
           letterSpacing: "0.04em",
-          color: mantineTheme.colors.gray[6],
+          // Follows the scheme's muted text, which is contrast-safe in both.
+          color: "var(--mantine-color-dimmed)",
         },
       }),
     }),

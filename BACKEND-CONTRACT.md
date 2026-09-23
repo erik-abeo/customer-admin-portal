@@ -34,7 +34,8 @@ migration key or the session token. When you adopt service-to-service tokens,
 swap the SPA's `StaticApiKeyAuthStrategy` (`src/api/httpClient.ts`) for a new
 strategy; no other UI code needs to change.
 
-Optional response header `X-Admin-Role`: when present, the SPA reads the
+Optional response header `X-Admin-Role`, **not sent by the service today** (it
+has no roles; the api-key grants full admin): when present, the SPA reads the
 caller's role from this header and gates write actions in the UI. Allowed
 values are `admin` (full write access) and `viewer`, `readonly` or
 `read-only` (read-only), in any case. The header is consumed by `captureRoleHeader` in
@@ -76,9 +77,12 @@ The contract for each is the corresponding TypeScript DTO in
 
 `create-user`, `update-user` and `delete-user` answer with a plain string on
 success ("User created successfully" and so on) and a plain string or a
-SuperTokens error object on a 400, not a `{ Success, Message }` object. The SPA
-does not read the success body; failures surface through the HTTP status, and
-the error interceptor shows a string body as the message.
+SuperTokens error object on a 400, not a `{ Success, Message }` object.
+`update-user` and `delete-user` also answer **404** "User not found in the custom
+database." for an unknown user, and all three answer **500** "Internal server
+error" on an unexpected failure. The SPA does not read the success body;
+failures surface through the HTTP status, and the error interceptor shows a
+string body as the message.
 
 ### 1.1 Database server probe
 
@@ -261,6 +265,14 @@ What each status means to the CrystalPM client, which authorizes through
   the selection list, and if only suspended or retired databases remain for a
   user, the first call answers the 403.
 
+`AuthorizeClient2`, the call after a database is picked, resolves the server
+from the chosen database's own registration, not from the `databaseServerId`
+the client sends. A database the user is not mapped to, or that does not exist,
+answers 401 "You are not authorized for the selected database.", one answer for
+all three so a caller cannot map out which ids exist. `KeepAliveDatabaseUser` on
+a session that has already ended is refused with 500 "Failed to authorize"
+rather than quietly succeeding.
+
 Suspending or retiring a database does not revoke static users' existing
 grants on it; it only stops new grants, which are refused for any database that
 is not `active`. Revoke them by editing the static user if they should stop
@@ -298,6 +310,10 @@ shows the service's `Message` for any refusal.
 
 `update-static-database-user` takes one row's `Id` and the `UserName`, which
 must match, plus a `Servers` list with the full privilege grid for each server.
+Two refusals reject the whole request with **400** and a plain string, before
+anything changes: a missing `Id`, `UserName` or `Servers` ("Invalid request.
+Id, UserName, and Server information are required."), and an `Id` and
+`UserName` that do not name the same row ("Invalid user Id or UserName.").
 A static user has one row per server, all sharing the name, and the update
 applies to all of them: current privileges are loaded by user name across every
 server, keyed by `(database_server_id, user_name)`, and on each server in the
@@ -305,13 +321,26 @@ request the grid replaces what the user held there. A database left out of a
 server's grid is revoked on that server; a server whose grid is empty loses all
 its grants. The wire format is unchanged.
 
-Each database in a grid must exist and be `active`. One that is not is refused
-in that database's `Errors` ("Database ID N does not exist." or "'name' is
-status, so static users cannot be granted it until it is active again."), is
-not recorded, and keeps whatever grant it already had; the top-level `Message`
-is then `Failure`. A server in the request that the user is not on is reported
-as a failure in that server's `Errors`. `NewDescription` is skipped when blank,
-so a description cannot be cleared.
+**Every requested database is checked before anything changes**, on create
+and on update. A database is refused when it does not exist ("Database ID N does
+not exist."), is not on the server it is listed under ("'name' is not on server
+N. Re-pick it under the server it is on."), is not `active` ("'name' is status,
+so static users cannot be granted it until it is active again."), or has no
+grantable privilege ticked ("No privilege is selected for 'name'. Select at
+least one, or remove the database."). If any is refused, the whole request is:
+the answer is 200 with `Message` `Failure` and `Servers` listing only the
+refused databases, each with its error, and nothing is created, granted or
+revoked. A refused create has an empty `UserName`. The portal checks the
+no-privilege case itself before sending.
+
+`GrantPrivilege` is unused. It stays on the wire for compatibility, but the
+service never grants `WITH GRANT OPTION`, always stores it as false and always
+returns it as false, so a database with only GRANT ticked has no privilege. The
+portal does not offer it and always sends false.
+
+A server in the request that the user is not on is reported as a failure in
+that server's `Errors`. `NewDescription` is skipped when blank, so a description
+cannot be cleared.
 
 ### 1.5 Server capacity and placement
 
@@ -399,6 +428,14 @@ target name. Any later status answers `Success: false` with the reason: a move
 that is copying or verifying either cuts over or fails by itself, and either way
 the customer is put back online.
 
+Two cancel outcomes need work by hand, and say so. If the empty target it
+reserved cannot be dropped, the cancel still succeeds, and the message ends
+"...could not be removed and needs dropping by hand." (nothing retries it, and
+the name stays taken on the target until then). If putting the database back to
+`active` fails, the answer is `Success: false`: "The move was cancelled, but the
+customer could not be put back online. Set the database's status back to active
+by hand." The portal shows both as a warning that stays until dismissed.
+
 `flipped` means cut over **with the source retained**. Rolling back is a single
 row update while that is true, which is why dropping the source is a separate
 action and the only irreversible one. Offer `roll-back` only for `flipped` with
@@ -410,11 +447,26 @@ move with `SourceDroppedDateTimeUtc` still null. The service claims a move by
 settling it before it drops the source, so a drop interrupted after that claim,
 by a crash or a restart, leaves the move settled with no drop recorded. Calling
 `drop-source` again finishes it; the portal labels that "Finish dropping
-source". A settled move cannot be rolled back, so there is nothing left to
-protect by keeping the source. Rolling back points the
-customer at the source as it was at cutover: anything written on the target
-since then stays on the target and is not carried back, and the UI should say
-so before the operator confirms.
+source".
+
+`drop-source` answers 404 for an unknown move, 200 with `Success: true` and
+"The source has already been dropped." for a second call, and 200 with
+`Success: false`, nothing changed, when:
+
+- another request is dropping the same source at that moment ("Refresh in a
+  moment.");
+- the move is not `flipped` or unfinished `settled` ("Only a move that cut over
+  cleanly has a source to retire.");
+- no source name was recorded, so it cannot be dropped safely;
+- the move changed while the request was checking it ("Refresh and try
+  again.");
+- the source is in use: a database is registered under that name on the source
+  server, or another unsettled move is moving a customer into it ("'name' was
+  not dropped: ... Nothing was changed."). A settled move cannot be rolled back, so there is nothing left to
+  protect by keeping the source. Rolling back points the
+  customer at the source as it was at cutover: anything written on the target
+  since then stays on the target and is not carried back, and the UI should say
+  so before the operator confirms.
 
 `Verification` on the detail response is per table and carries
 `VerificationMethod`, either `checksum` or `row_count`, recorded per table:
@@ -485,6 +537,7 @@ it for credentials scoped to that one schema and streams the database in.
 | GET    | `/My/get-migration-sessions`        | -                               | `GetMigrationSessionsResponse`   |
 | GET    | `/My/get-migration-session/{id}`    | -                               | `GetMigrationSessionResponse`    |
 | POST   | `/My/revoke-migration-session/{id}` | -                               | `{ Success, Message }`           |
+| POST   | `/My/discard-migration-target/{id}` | -                               | `{ Success, Message }`           |
 
 Three further endpoints exist for the installer and are **not for the portal**:
 `redeem-migration-key`, `migration-session/heartbeat` and
@@ -506,18 +559,29 @@ with the server list (`DatabaseServerInfoItem.Status`), and the portal reads it
 from there to disable those servers in its pickers, with the reason, for a key
 that provisions and for a move's target.
 
+A missing body, a `DatabaseServerId` below 1 ("A database server must be
+selected.") and a `CrystalPmId` below 1 ("A CrystalPM customer id is required.")
+are 400s, and so is a name to provision that is not a usable identifier ("'name'
+is not a usable database name. Use letters, digits and underscores, starting
+with a letter.").
+
 A name to provision is also a 400 when this customer already has any database on
 that server (select it as the existing database instead), when the name is
-already registered on that server, and when a customer move is copying into a
-database of that name there. Provisioning only ever creates: it never adopts a
+already registered on that server, and when any unfinished move (`planned`,
+`draining`, `copying` or `verifying`) targets a database of that name there;
+once such a move has flipped, its target is registered and the previous check
+catches it. Provisioning only ever creates: it never adopts a
 database that already exists, because a failed migration's target may later be
 discarded, and that is only safe for one the migration made. Every CrystalPM
 source database has the same name, so the default is taken on any server that
 already has a customer: propose something unique, such as the name plus the
 CrystalPM id.
 
-An existing database is also a 400 when it is not `active` or has a customer
-move in progress. Redemption checks both again, along with the server and the
+An existing database is also a 400 when it is not `active`, has a customer
+move in progress, or already has a live migration key: another session on it
+that is `redeemed`, `streaming`, or `pending` and not yet expired ("The selected
+database already has a live migration key (session N, status). Revoke it first,
+or wait for it to finish."). The portal shows the service's message. Redemption checks both again, along with the server and the
 owner, since minting may have been hours earlier.
 
 **The key as typed.** Redemption accepts the key with or without its `CPM-`
@@ -583,7 +647,15 @@ only that it failed.
 already redeemed it also drops the installer's database login and ends its
 connections, so a running stream stops there and then; whatever it had written
 stays in the target until that is discarded. A session that already finished
-returns `Success: false` with a message rather than being rewritten.
+returns `Success: false` with a message rather than being rewritten, and an
+unknown id is a 404.
+
+If the installer's login cannot be dropped, revoke answers **500** with
+`Success: false`, but the key **is** revoked: the message says the login may
+still be streaming, and the service's sweeper retries the drop, and ends its
+connections, every few minutes until it succeeds. Drop the login by hand on the
+server if it cannot wait. Any other unexpected failure is a 500 "Internal server
+error".
 
 **Discarding a failed target** is `POST /My/discard-migration-target/{id}`. A
 failed migration leaves its destination exactly as it was, half imported, on
@@ -625,9 +697,13 @@ them, so the history survives. A second discard of the same session answers
 
 **Redemption can answer 409.** A good key whose destination is no longer
 usable is refused with 409 and a `Message` saying what is in the way: a schema of
-that name appeared on the server after minting, or the existing database it was
+that name appeared on the server after minting; the existing database it was
 minted against has since moved, changed owner, stopped being `active` or started
-a move. The key stays `pending` and redeems normally once the conflict is
+a move; another session on that database is `redeemed` or `streaming`
+("Another migration is already streaming into this database (...)"); or, for a
+key that provisions, its server has stopped being `available` since minting
+("... so it is not taking new customers. Nothing was created; the key can be
+used once the server is available again."). The key stays `pending` and redeems normally once the conflict is
 cleared. A `ClientPublicIpAddress` that is not exactly one IPv4 or IPv6 address
 is a 400 saying so, and an unexpected failure is a 500. Every other refusal is
 401 with one deliberately uninformative message.
@@ -652,6 +728,13 @@ page load renders it through `QueryStatus` with a title chosen by status and the
 message as detail; a failed action shows a red notification from `notifyError`
 with the message and `(status N)`. Queries are not retried on 4xx.
 `Retry-After` is not read.
+
+The three user reads (`get-users`, `get-users/{server}/{db}` and `get-user`)
+answer **200** with `Success: false` when the service could not read users, and
+`get-users/{server}/{db}` carries only the requested mapping for each user.
+`src/api/authorizedUsers.ts` turns `Success: false` into an `ApiError` with the
+service's `Message` (status 200), so a failed read shows as an error rather than
+as an empty list.
 
 | Status   | Failed page load (`QueryStatus`)                                                 | Failed action (`notifyError`) |
 | -------- | -------------------------------------------------------------------------------- | ----------------------------- |

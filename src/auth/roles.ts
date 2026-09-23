@@ -23,7 +23,7 @@ let currentRole: AdminRole | null = null;
 const subscribers = new Set<(role: AdminRole) => void>();
 
 export function setCurrentRole(role: AdminRole | string | null | undefined): void {
-  const next = normalize(role);
+  const next = normalizeRole(role);
   if (next === currentRole) return;
   currentRole = next;
   for (const sub of subscribers) {
@@ -35,7 +35,10 @@ export function setCurrentRole(role: AdminRole | string | null | undefined): voi
   }
 }
 
-function normalize(role: AdminRole | string | null | undefined): AdminRole | null {
+/** A header value as a role, or null for none or one the portal does not know. */
+export function normalizeRole(
+  role: AdminRole | string | null | undefined,
+): AdminRole | null {
   if (!role) return null;
   const lower = String(role).trim().toLowerCase();
   if (lower === "admin") return "admin";

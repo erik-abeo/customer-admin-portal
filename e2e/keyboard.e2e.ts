@@ -35,9 +35,10 @@ test.describe("Keyboard navigation", () => {
     await expect(skipLink).toBeFocused();
     // Activating the skip link should land focus inside <main id="main">.
     await page.keyboard.press("Enter");
-    // The hash navigation moves focus to the main landmark.
+    // The hash navigation moves focus to the main landmark, so the next Tab
+    // starts inside the page rather than back in the header.
     const main = page.locator("main#main");
-    await expect(main).toBeVisible();
+    await expect(main).toBeFocused();
   });
 
   test("primary navigation is reachable with Tab + Enter", async ({ page }) => {

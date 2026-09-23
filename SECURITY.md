@@ -52,20 +52,27 @@ talks to the ClientRemoteDatabaseAccessAPI over HTTPS.
   header.
 - **Authentication target:** Supertokens-issued session tokens. The
   `AuthStrategy` interface in `src/api/httpClient.ts` is the swap point.
-- **Authorization:** role gating is performed by the backend. The portal
-  reads the response header `X-Admin-Role` to enable or disable destructive
-  UI controls (view-only vs. admin) but does **not** rely on this for
-  enforcement — every write call goes through the backend, which is the
-  source of truth.
+- **Authorization:** the backend has no roles today. The `api-key` grants full
+  admin access to every management endpoint, and nothing in the service sends
+  an `X-Admin-Role` header. `VITE_FEATURE_RBAC` is UI-only: it hides or
+  disables write controls according to that header, and enforces nothing. With
+  it on and no header, every caller is treated as a viewer, so it must stay off
+  in real builds until the backend issues roles, sends the header and enforces
+  them on its endpoints.
 - **Transport:** HTTPS only (HSTS preload-eligible policy is enforced by the
-  Nginx configuration in `deploy/nginx/`).
+  nginx configuration in `deploy/nginx.conf`, with the headers themselves in
+  `deploy/security-headers.conf`). The container serves plain HTTP on 8080, so
+  TLS terminates at the load balancer in front of it.
 - **Static assets:** strict CSP, COOP, CORP, X-Frame-Options, Referrer-Policy,
-  and Permissions-Policy headers; no `unsafe-eval`. See `deploy/nginx/`.
+  and Permissions-Policy headers. `script-src 'self'` forbids inline scripts
+  and `eval`; `style-src` allows `'unsafe-inline'`, which Mantine's runtime
+  styles need. See `deploy/security-headers.conf`.
 - **Secrets in code:** none. The repository contains an `.env.example`. The
   `api-key`, Sentry DSN, and other deployment-specific values are injected at
   build / runtime.
 - **Source maps:** built as `hidden` in production and stripped from the
-  Docker image; uploaded directly to Sentry for symbolication.
+  Docker image. Nothing uploads them to Sentry today; `deploy/README.md`
+  describes how a CI job could.
 - **PII scrubbing:** Sentry events and breadcrumbs are passed through
   `scrubBreadcrumb` / `scrubEvent` (see `src/lib/sentry.ts`) which strip the
   `api-key` header in any casing.
@@ -94,7 +101,7 @@ talks to the ClientRemoteDatabaseAccessAPI over HTTPS.
 | Threat                                  | Mitigation                                                                                                                                                                                                   |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Stolen API key                          | sessionStorage only; idle sign-out; HTTPS-only transport                                                                                                                                                     |
-| XSS via injected content in admin input | React escapes by default; CSP forbids `unsafe-inline` / `unsafe-eval`                                                                                                                                        |
+| XSS via injected content in admin input | React escapes by default; CSP forbids inline scripts and `eval` (`style-src` allows inline styles)                                                                                                           |
 | CSRF                                    | API requires the `api-key` header; cookies aren't used                                                                                                                                                       |
 | Open redirect on `/login?redirect=`     | `safeRedirect` (`src/auth/redirectSafety.ts`) rejects absolute / `//` paths                                                                                                                                  |
 | Source-map exposure                     | Vite emits `hidden` maps; Dockerfile strips `*.map` before publishing                                                                                                                                        |

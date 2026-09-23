@@ -22,6 +22,8 @@ import {
   emptyPrivileges,
 } from "@/api/types";
 
+import { GRANTABLE_PRIVILEGES } from "./privileges";
+
 interface PrivilegesEditorProps {
   servers: DatabaseServerInfoItem[];
   databases: DatabaseInfoItem[];
@@ -35,19 +37,8 @@ interface PrivilegesEditorProps {
   lockServers?: boolean;
 }
 
-const PRIV_FIELDS: ReadonlyArray<{
-  key: keyof DatabasePrivileges;
-  label: string;
-}> = [
-  { key: "AllPrivileges", label: "ALL" },
-  { key: "SelectPrivilege", label: "SELECT" },
-  { key: "InsertPrivilege", label: "INSERT" },
-  { key: "UpdatePrivilege", label: "UPDATE" },
-  { key: "DeletePrivilege", label: "DELETE" },
-  { key: "CreatePrivilege", label: "CREATE" },
-  { key: "DropPrivilege", label: "DROP" },
-  { key: "GrantPrivilege", label: "GRANT" },
-];
+// No GRANT column: the service never grants WITH GRANT OPTION.
+const PRIV_FIELDS = GRANTABLE_PRIVILEGES;
 
 export function PrivilegesEditor({
   servers,

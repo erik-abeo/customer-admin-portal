@@ -1,5 +1,4 @@
 import {
-  Loader,
   ActionIcon,
   Button,
   Card,
@@ -96,8 +95,9 @@ export function DatabaseServersPage() {
       centered: true,
       children: (
         <Text size="sm">
-          This permanently removes the server registration. Existing customer databases
-          on this server will become unmanageable. This cannot be undone.
+          This permanently removes the server registration. It is refused while any
+          database is still registered on the server; move or remove those first. This
+          cannot be undone.
         </Text>
       ),
       labels: { confirm: "Delete server", cancel: "Cancel" },
@@ -344,8 +344,13 @@ export function DatabaseServersPage() {
         title={editTarget ? `Edit ${editTarget.Name}` : "Edit"}
         size="lg"
       >
+        {/* A failed read shows why, with a retry, rather than loading forever. */}
         {editTarget && !editServer.data && (
-          <Loader size="sm" aria-label="Loading server" />
+          <QueryStatus
+            isLoading={editServer.isLoading}
+            error={editServer.error}
+            onRetry={() => void editServer.refetch()}
+          />
         )}
         {editTarget && editServer.data && (
           <DatabaseServerForm
