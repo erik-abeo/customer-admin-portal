@@ -39,6 +39,8 @@ describe("mutations that fail still refresh what they may have changed", () => {
     expect(keys).toContainEqual(["customer-moves"]);
     expect(keys).toContainEqual(["customer-moves", 7]);
     expect(keys).toContainEqual(["databases"]);
+    // Every mapping names its database's server, so a move stales them.
+    expect(keys).toContainEqual(["authorized-users"]);
   });
 
   it("a revoke that answered 500 with the key revoked refreshes the sessions", async () => {

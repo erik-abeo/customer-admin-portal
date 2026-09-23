@@ -14,6 +14,7 @@ import { useForm } from "@mantine/form";
 import { IconKey, IconShieldCheck, IconUser } from "@tabler/icons-react";
 
 import type {
+  CustomerMove,
   CreateStaticDatabaseUserRequest,
   DatabaseInfoItem,
   DatabaseServerInfoItem,
@@ -49,6 +50,8 @@ interface StaticUserFormProps {
    * operator can fix it without re-entering anything.
    */
   refusal?: { title: string; reasons: string[] } | null;
+  /** Customer moves; a database with an unsettled move cannot be granted. */
+  moves?: CustomerMove[];
 }
 
 export function StaticUserForm({
@@ -61,6 +64,7 @@ export function StaticUserForm({
   onSubmit,
   submitting,
   refusal,
+  moves = [],
 }: StaticUserFormProps) {
   const isEdit = Boolean(initial);
 
@@ -81,7 +85,7 @@ export function StaticUserForm({
       Servers: (grids) =>
         grids.length === 0
           ? "Add at least one server with database privileges"
-          : whyPrivilegesIncomplete(grids, servers, databases),
+          : whyPrivilegesIncomplete(grids, servers, databases, moves),
     },
   });
 
@@ -179,6 +183,7 @@ export function StaticUserForm({
             value={form.values.Servers}
             onChange={(next) => form.setFieldValue("Servers", next)}
             lockServers={isEdit}
+            moves={moves}
           />
           {form.errors.Servers && (
             <Text size="sm" c="red" role="alert">

@@ -165,6 +165,13 @@ function whyNotGrantable(
   const status = database.Status ?? "active";
   if (status.toLowerCase() !== "active")
     return `'${database.DatabaseName}' is ${status}, so static users cannot be granted it until it is active again.`;
+  // A grant made on a cut-over target would be left there by a rollback.
+  if (
+    demoStore.customerMoves.some(
+      (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
+    )
+  )
+    return `'${database.DatabaseName}' ${UNSETTLED_MOVE_ADVICE}`;
   if (!hasGrantablePrivilege(requested.Privileges))
     return `No privilege is selected for '${database.DatabaseName}'. Select at least one, or remove the database.`;
   return null;
@@ -274,8 +281,29 @@ function mismatchedMappings(
   };
 }
 
+/** The service's advice for a database with an unsettled move, word for word. */
+const UNSETTLED_MOVE_ADVICE =
+  "has a customer move that is still in progress or can still be rolled back. Let it finish or cancel it, or once it has cut over, settle it by dropping the source or roll it back, then try again.";
+
 /** Move statuses the service counts as in progress (CustomerMoveRepository.ActiveStatuses). */
 const ACTIVE_MOVE_STATUSES = new Set(["planned", "draining", "copying", "verifying"]);
+
+/**
+ * SuperTokens refuses an email another user already has, whatever its case,
+ * and the service passes that refusal through as the 400 body. The user being
+ * edited keeps their own email.
+ */
+function emailTaken(
+  email: string | null | undefined,
+  exceptUserId: number | null,
+): HandlerResult | null {
+  const wanted = (email ?? "").trim().toLowerCase();
+  if (!wanted) return null;
+  const clash = demoStore.authorizedUsers.some(
+    (u) => u.Id !== exceptUserId && u.Email.trim().toLowerCase() === wanted,
+  );
+  return clash ? { status: 400, data: { Status: "EMAIL_ALREADY_EXISTS_ERROR" } } : null;
+}
 
 function mintRefusal(req: CreateMigrationSessionRequest): string | null {
   // As the service checks it: a stale server id is a refusal, and only an
@@ -325,14 +353,15 @@ function mintRefusal(req: CreateMigrationSessionRequest): string | null {
   // progress shows as `moving`.
   if (database.Status !== "active")
     return `The selected database is ${database.Status}, so nothing may be migrated into it.`;
-  // A planned move leaves the database active, so its status alone does not
-  // show the move; the service checks the moves themselves.
+  // Any unsettled move, as the service counts it: in progress, cut over and
+  // still able to roll back, or settled with the source drop unfinished. A
+  // planned or flipped move leaves the database active, so status alone misses it.
   if (
     demoStore.customerMoves.some(
-      (m) => m.DatabaseId === database.Id && ACTIVE_MOVE_STATUSES.has(m.Status ?? ""),
+      (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
     )
   )
-    return "The selected database has a customer move in progress. Wait for it to finish or cancel it.";
+    return `The selected database ${UNSETTLED_MOVE_ADVICE}`;
   // One live key per database, as the service allows: none while another is
   // redeemed, streaming, or pending and not yet expired.
   const live = demoStore.migrationSessions.filter(
@@ -607,6 +636,30 @@ const ROUTES: Route[] = [
           MoveId: move.Id,
         });
       }
+      // As the service refuses a rollback: static grants and a streaming
+      // migration both live on the target and would be left behind.
+      const staticGrants = Object.values(demoStore.staticUserPrivileges)
+        .flat()
+        .some((p) => p.DatabaseId === move.DatabaseId);
+      if (staticGrants)
+        return ok({
+          Success: false,
+          MoveId: move.Id,
+          Message:
+            "This move cannot be rolled back while static users hold privileges on the database, because their grants are on the target server and would be left behind. Remove those static user grants first, then try again. Nothing was changed.",
+        });
+      const streaming = demoStore.migrationSessions.some(
+        (m) =>
+          m.DatabaseId === move.DatabaseId &&
+          (m.Status === "redeemed" || m.Status === "streaming"),
+      );
+      if (streaming)
+        return ok({
+          Success: false,
+          MoveId: move.Id,
+          Message:
+            "This move cannot be rolled back while a migration is streaming into the database, because it is writing to the target server and those rows would be left behind. Wait for it to finish, or revoke it, then try again. Nothing was changed.",
+        });
       move.Status = "rolled_back";
       restoreSource(demoStore, move);
       move.PhaseDetail =
@@ -1148,11 +1201,10 @@ const ROUTES: Route[] = [
     handle: ({ params }) => {
       const id = Number(params.id);
       const found = demoStore.databases.find((d) => d.Id === id);
-      return ok({
-        Success: !!found,
-        Message: found ? null : `Database ${id} not found`,
-        DatabaseInfo: found ?? null,
-      });
+      // As the service answers an unknown id: 404 with a plain string.
+      if (!found)
+        return { status: 404, data: `Database info with ID ${id} not found.` };
+      return ok({ Success: true, Message: null, DatabaseInfo: found });
     },
   },
   {
@@ -1314,6 +1366,8 @@ const ROUTES: Route[] = [
       const req = body as CreateUserRequest;
       const mismatch = mismatchedMappings(req.DatabaseMappings);
       if (mismatch) return mismatch;
+      const taken = emailTaken(req.Email, null);
+      if (taken) return taken;
       const next: AuthorizedUserInfoItem = {
         Id: demoStore.authorizedUserIds.next(),
         Email: req.Email,
@@ -1341,6 +1395,8 @@ const ROUTES: Route[] = [
       if (idx === -1) return notFound(`User ${req.UserId} not found`);
       const mismatch = mismatchedMappings(req.DatabaseMappings);
       if (mismatch) return mismatch;
+      const taken = emailTaken(req.Email, userId);
+      if (taken) return taken;
       const current = demoStore.authorizedUsers[idx];
       demoStore.authorizedUsers[idx] = {
         ...current,

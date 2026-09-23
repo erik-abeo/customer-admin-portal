@@ -11,3 +11,13 @@ export const shouldSweepAfterFailedStart = (
   serversVerified: boolean,
   keep: string | undefined,
 ): boolean => serversVerified && keep !== "1";
+
+/**
+ * Whether a process's command line is this suite's API: dotnet running
+ * ClientRemoteDatabaseAccessAPI.dll. A stale lock names the API's PID, and a
+ * PID can be reused once its process ends, so this is checked before killing
+ * it.
+ */
+export const isApiCommandLine = (commandLine: string): boolean =>
+  /\bdotnet(\.exe)?\b/i.test(commandLine) &&
+  /ClientRemoteDatabaseAccessAPI\.dll/i.test(commandLine);

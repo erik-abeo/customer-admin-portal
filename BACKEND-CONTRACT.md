@@ -84,18 +84,22 @@ error" on an unexpected failure. The SPA does not read the success body;
 failures surface through the HTTP status, and the error interceptor shows a
 string body as the message.
 
-**Known issue, pending confirmation of what is deployed: user writes do not
-work against the repository's SuperTokens backend.** `SupertokensService`
-calls `create-user`, `update-user` and `delete-user` on the backend at
-`Supertokens:ApiUrl`, with no session and no `Authorization` header. The
-backend in this repository
+**Known issue, pending confirmation of what is deployed: the user endpoints do
+not work against the repository's SuperTokens backend.** `SupertokensService`
+calls six routes on the backend at `Supertokens:ApiUrl`: `create-user`,
+`update-user`, `delete-user`, `user-by-id`, `user-by-email` and `users`. It
+sends no session and no `Authorization` header. The backend in this repository
 (`remote-database-system/GatewayServer/SupertokensFrontendAndBackend/backend/userRoutes.ts`)
-puts all three behind `verifySession()`, so against it:
+puts all six behind `verifySession()`, so against it every call answers 401 and
+`HandleResponse` throws. Then:
 
-- **Each call answers 401.** `HandleResponse` throws on the non-success status,
-  and the controller answers **500** "Internal server error". Nothing changes,
-  in SuperTokens or locally. This is the case for creating a user too.
-- **If the deployed backend accepts the call** (no `verifySession()`, or a
+- **Reads fail.** `get-users`, `get-users/{server}/{db}` and `get-user` catch
+  the failure and answer 200 with `Success: false`, so the portal's Authorized
+  users page shows an error rather than the list.
+- **Writes fail and change nothing.** `create-user`, `update-user` and
+  `delete-user` answer 500 "Internal server error", with nothing changed in
+  SuperTokens or locally.
+- **If the deployed backend accepts the calls** (no `verifySession()`, or a
   session the service does send), a second problem follows for update and
   delete. The backend answers them with 200 `{"message": ...}` and no `status`
   field, and `UserManagementController` treats any answer whose `Status` is not
@@ -105,9 +109,12 @@ puts all three behind `verifySession()`, so against it:
   not removed. Create is not affected by this part: `create-user` returns the
   SuperTokens sign-up response, which does carry `status`.
 
-Both predate this branch. The portal's behaviour is unchanged: it shows the 500
-or the 400 as a failure. After a 400 that is misleading, since the email,
-password or SuperTokens user has already changed or gone.
+Nothing in the test suites exercises this. The live suite points the service's
+`Supertokens:ApiUrl` at `http://127.0.0.1:9`, where nothing listens, and does
+not use the Authorized users page. Both problems predate this branch. The
+portal's behaviour is unchanged: it shows these failures as failures. After a
+400 that is misleading, since the email, password or SuperTokens user has
+already changed or gone.
 
 ### 1.1 Database server probe
 
@@ -198,8 +205,12 @@ On edit, a blank password or certificate field means "keep the stored one", and
 the probe uses the stored value in its place. That works because
 `get-database-server-info/{id}` and `get-all-database-server-info` return the
 **decrypted** `RootUserPassword` and `Certificate`, which predates this branch.
-The portal relies on it for edits and probes, never displays the password, and
-clears its query cache on sign-out so the value does not outlive the session.
+The portal keeps them out of its cache: the server list and every server read
+other than the edit form's are stripped of both before they are cached (only a
+`HasCertificate` flag is kept). Only the edit form reads the decrypted values,
+through its own query with `gcTime` 0, so they are dropped as soon as the form
+closes; the mutations that carry a password are reset on close too. The password
+is never displayed, and the cache is cleared on sign-out.
 
 The probe is sent with `SslMode` `VerifyCA` whenever a certificate is present,
 since that is what the installer is handed at redemption, and `Required`
@@ -379,7 +390,12 @@ its grants. The wire format is unchanged.
 and on update. A database is refused when it does not exist ("Database ID N does
 not exist."), is not on the server it is listed under ("'name' is not on server
 N. Re-pick it under the server it is on."), is not `active` ("'name' is status,
-so static users cannot be granted it until it is active again."), or has no
+so static users cannot be granted it until it is active again."), has an
+unsettled move, flipped included ("'name' has a customer move that is still in
+progress or can still be rolled back. Let it finish or cancel it, or once it has
+cut over, settle it by dropping the source or roll it back, then try again."),
+since a grant made on a cut-over target would be left there by a rollback, or
+has no
 grantable privilege ticked ("No privilege is selected for 'name'. Select at
 least one, or remove the database."). If any is refused, the whole request is:
 the answer is 200 with `Message` `Refused` and `Servers` listing only the
@@ -503,6 +519,21 @@ the name stays taken on the target until then). If putting the database back to
 `active` fails, the answer is `Success: false`: "The move was cancelled, but the
 customer could not be put back online. Set the database's status back to active
 by hand." The portal shows both as a warning that stays until dismissed.
+
+Rolling back also answers 200 with `Success: false`, nothing changed, when:
+
+- static users hold privileges on the database: "This move cannot be rolled
+  back while static users hold privileges on the database, because their grants
+  are on the target server and would be left behind. Remove those static user
+  grants first, then try again. Nothing was changed."
+- a migration is streaming into it: "This move cannot be rolled back while a
+  migration is streaming into the database, because it is writing to the target
+  server and those rows would be left behind. Wait for it to finish, or revoke
+  it, then try again. Nothing was changed."
+
+The portal shows whichever `Message` comes back. Its migration picker and the
+static user editor treat a database with an unsettled move as unavailable, with
+that reason, and demo mode refuses all of the above in the service's words.
 
 `flipped` means cut over **with the source retained**. Rolling back is a single
 row update while that is true, which is why dropping the source is a separate
@@ -645,8 +676,12 @@ source database has the same name, so the default is taken on any server that
 already has a customer: propose something unique, such as the name plus the
 CrystalPM id.
 
-An existing database is also a 400 when it is not `active`, has a customer
-move in progress, or already has a live migration key: another session on it
+An existing database is also a 400 when it is not `active`, has an unsettled
+customer move (in progress, cut over and still able to roll back, or settled
+with its source drop unfinished: "The selected database has a customer move
+that is still in progress or can still be rolled back. Let it finish or cancel
+it, or once it has cut over, settle it by dropping the source or roll it back,
+then try again."), or already has a live migration key: another session on it
 that is `redeemed`, `streaming`, or `pending` and not yet expired ("The selected
 database already has a live migration key (session N, status). Revoke it first,
 or wait for it to finish."). The portal shows the service's message. Redemption checks both again, along with the server and the
@@ -770,8 +805,10 @@ them, so the history survives. A second discard of the same session answers
 **Redemption can answer 409.** A good key whose destination is no longer
 usable is refused with 409 and a `Message` saying what is in the way: a schema of
 that name appeared on the server after minting; the existing database it was
-minted against has since moved, changed owner, stopped being `active` or started
-a move; another session on that database is `redeemed` or `streaming`
+minted against has since moved, changed owner, stopped being `active` or gained
+an unsettled move ("The database this key was minted for has a customer move
+that is still in progress or can still be rolled back...", with the same
+advice); another session on that database is `redeemed` or `streaming`
 ("Another migration is already streaming into this database (...)"); or, for a
 key that provisions, its server has stopped being `available` since minting
 ("... so it is not taking new customers. Nothing was created; the key can be
@@ -814,7 +851,7 @@ as an empty list.
 | 401      | Every 401 signs the operator out, clears the query cache and returns to `/login` | same                          |
 | 403      | "You don't have access to this"                                                  | message (status 403)          |
 | 404      | "Not found", with retry                                                          | message (status 404)          |
-| 400, 422 | "Validation failed"                                                              | message (status 400)          |
+| 400, 422 | "Validation failed"                                                              | message (status 400 or 422)   |
 | 409      | "This record changed somewhere else"                                             | message (status 409)          |
 | 429      | "Too many requests"                                                              | message (status 429)          |
 | 5xx      | "The server hit a problem", with retry                                           | message (status 5xx)          |

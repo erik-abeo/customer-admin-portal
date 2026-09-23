@@ -31,17 +31,27 @@ export function useStaticUser(id: number | undefined) {
   });
 }
 
+/** Static grant counts, and whether they can be relied on yet. */
+export interface StaticGrantCounts {
+  /** Grants per database id; only complete once `status` is "ready". */
+  counts: Map<number, number>;
+  /**
+   * "loading" until every user's grants have been read, "error" if any read
+   * failed, "ready" once all have. Until "ready" the counts must not be taken
+   * as zero: a database could carry grants that have not been read.
+   */
+  status: "idle" | "loading" | "error" | "ready";
+}
+
 /**
- * How many static user privileges each database carries, keyed by database id,
- * or undefined until every user's grants have loaded. Counted as the service
- * counts them for a move's refusal: one per user row per database.
+ * How many static user privileges each database carries, keyed by database id.
+ * Counted as the service counts them for a move's refusal: one per user row
+ * per database.
  *
  * The list does not carry grants, so each row's detail is read; it shares the
  * detail query with the edit form. Pass `enabled` false to read nothing.
  */
-export function useStaticGrantCounts(
-  enabled: boolean,
-): Map<number, number> | undefined {
+export function useStaticGrantCounts(enabled: boolean): StaticGrantCounts {
   const list = useQuery({
     queryKey: KEYS.all,
     queryFn: () => staticUsersApi.list(),
@@ -53,12 +63,15 @@ export function useStaticGrantCounts(
       queryFn: () => staticUsersApi.get(row.Id),
     })),
   });
-  if (!enabled || !list.data || details.some((d) => !d.data)) return undefined;
   const counts = new Map<number, number>();
+  if (!enabled) return { counts, status: "idle" };
+  if (list.isError || details.some((d) => d.isError))
+    return { counts, status: "error" };
+  if (!list.data || details.some((d) => !d.data)) return { counts, status: "loading" };
   for (const detail of details)
     for (const grant of detail.data?.DatabasePrivileges ?? [])
       counts.set(grant.DatabaseId, (counts.get(grant.DatabaseId) ?? 0) + 1);
-  return counts;
+  return { counts, status: "ready" };
 }
 
 export function useCreateStaticUser() {

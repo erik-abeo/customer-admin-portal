@@ -9,6 +9,7 @@ import type {
   MigrationSessionItem,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
+import type { StaticGrantCounts } from "@/features/staticUsers/queries";
 import { useRefreshOnStatusChange } from "@/lib/statusChanges";
 
 const KEYS = {
@@ -78,13 +79,17 @@ export const whyDatabaseNotMovable = (
   database: DatabaseInfoItem,
   moves: ReadonlyArray<CustomerMove>,
   sessions: ReadonlyArray<MigrationSessionItem> = [],
-  staticGrants?: ReadonlyMap<number, number>,
+  staticGrants?: StaticGrantCounts,
 ): string | null => {
   const unavailable = whyDatabaseUnavailable(database.Status);
   if (unavailable) return unavailable;
   // Refused by the service too: the grants live on the source server, and a
   // move does not carry them, so they would still point at the old copy.
-  const grants = staticGrants?.get(database.Id) ?? 0;
+  // Until every grant has been read, none may be assumed absent.
+  if (staticGrants?.status === "loading") return "checking static user grants";
+  if (staticGrants?.status === "error")
+    return "static user grants could not be read, so it cannot be checked";
+  const grants = staticGrants?.counts.get(database.Id) ?? 0;
   if (grants > 0)
     return `${grants} static user privilege(s) are held on it, and moves do not carry static users yet`;
   const unsettled = moves.find(
@@ -120,12 +125,20 @@ const ACTIVE_POLL_MS = 5_000;
  * over repoints it at another server, and failing, cancelling or rolling back
  * restores it, so every phase change is a reason to refetch these.
  */
-const MOVED_BY_A_MOVE = [["databases"], ["server-capacity"]] as const;
+// A flip, rollback or source drop repoints a database, and every authorized
+// user's mapping names the database's server, so their list goes stale too.
+// Static users are not affected: a move refuses a database they hold grants on.
+const MOVED_BY_A_MOVE = [
+  ["databases"],
+  ["server-capacity"],
+  ["authorized-users"],
+] as const;
 
-export function useCustomerMoves() {
+export function useCustomerMoves(options: { enabled?: boolean } = {}) {
   const query = useQuery({
     queryKey: KEYS.all,
     queryFn: () => movesApi.list(),
+    enabled: options.enabled ?? true,
     refetchInterval: (query) =>
       (query.state.data ?? []).some((m) => isActiveMove(m.Status))
         ? ACTIVE_POLL_MS
@@ -173,6 +186,7 @@ const invalidateMoveAndDatabases = (
   // and the capacity view are stale once they finish, even when they fail.
   qc.invalidateQueries({ queryKey: ["databases"] });
   qc.invalidateQueries({ queryKey: ["server-capacity"] });
+  qc.invalidateQueries({ queryKey: ["authorized-users"] });
 };
 
 export function useCancelCustomerMove() {

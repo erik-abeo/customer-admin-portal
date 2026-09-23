@@ -1,10 +1,12 @@
 import type {
+  CustomerMove,
   DatabaseInfoItem,
   DatabasePrivileges,
   DatabaseServerInfoItem,
   DatabaseServerPrivilegeInfo,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
+import { isUnsettledMove } from "@/features/moves/queries";
 
 /**
  * The privileges the service turns into a GRANT, in the order the editor shows
@@ -37,6 +39,24 @@ export const whyNotGrantableStatus = (
 ): string | null => (status ? whyDatabaseUnavailable(status) : null);
 
 /**
+ * Why a database cannot be granted to a static user now, or null: its status,
+ * or a move of it that is unsettled (in progress, cut over and still able to
+ * roll back, or settled with the source drop unfinished). The service refuses
+ * both, since a grant made on the target would be left behind by a rollback.
+ */
+export const whyNotGrantable = (
+  database: DatabaseInfoItem | undefined,
+  moves: ReadonlyArray<CustomerMove> = [],
+): string | null => {
+  if (!database) return null;
+  const status = whyNotGrantableStatus(database.Status);
+  if (status) return status;
+  return moves.some((m) => m.DatabaseId === database.Id && isUnsettledMove(m))
+    ? "a customer move of it is still in progress or can still be rolled back"
+    : null;
+};
+
+/**
  * Why the grids cannot be saved, or null when they can. The service refuses the
  * whole request if any ticked database has no privilege, which would be a GRANT
  * of nothing, or is not active, which includes one the user already holds that
@@ -47,6 +67,7 @@ export const whyPrivilegesIncomplete = (
   grids: DatabaseServerPrivilegeInfo[],
   servers: DatabaseServerInfoItem[],
   databases: DatabaseInfoItem[],
+  moves: ReadonlyArray<CustomerMove> = [],
 ): string | null => {
   const where = (serverId: number, databaseId: number) => {
     const database =
@@ -74,8 +95,9 @@ export const whyPrivilegesIncomplete = (
         );
   const unavailable = grids.flatMap((grid) =>
     grid.Databases.flatMap((d) => {
-      const reason = whyNotGrantableStatus(
-        databases.find((x) => x.Id === d.DatabaseId)?.Status,
+      const reason = whyNotGrantable(
+        databases.find((x) => x.Id === d.DatabaseId),
+        moves,
       );
       return reason ? [`${where(grid.ServerId, d.DatabaseId)} (${reason})`] : [];
     }),
@@ -88,7 +110,7 @@ export const whyPrivilegesIncomplete = (
   const problems = [
     misplaced.length > 0 ? `${misplaced.join(" ")} Remove it from this server.` : null,
     unavailable.length > 0
-      ? `Untick ${unavailable.join(", ")}: static users can only be granted an active database, and the service refuses the whole change otherwise.`
+      ? `Untick ${unavailable.join(", ")}: static users can only be granted an active database with no unsettled move, and the service refuses the whole change otherwise.`
       : null,
     missing.length > 0
       ? `Pick at least one privilege for ${missing.join(", ")}, or untick it.`

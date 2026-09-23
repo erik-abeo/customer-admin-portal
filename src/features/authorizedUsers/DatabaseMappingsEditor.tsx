@@ -1,4 +1,4 @@
-import { Checkbox, Stack, Text, Title } from "@mantine/core";
+import { Button, Checkbox, Group, Stack, Text, Title } from "@mantine/core";
 import { useMemo } from "react";
 
 import type {
@@ -53,6 +53,60 @@ export function DatabaseMappingsEditor({
     }
   };
 
+  // Held pairs that match no checkbox: the database has moved to another server
+  // since the mapping was saved, or no longer exists. Without a row of their
+  // own they would be sent back unseen, and the service refuses a pair that
+  // names the wrong server.
+  const unmatched = value.filter(
+    (m) =>
+      !databases.some(
+        (d) => d.Id === m.DatabaseId && d.DatabaseServerId === m.DatabaseServerId,
+      ),
+  );
+  const remove = (pair: DatabaseMapping) =>
+    onChange(
+      value.filter(
+        (m) =>
+          !(
+            m.DatabaseServerId === pair.DatabaseServerId &&
+            m.DatabaseId === pair.DatabaseId
+          ),
+      ),
+    );
+
+  const unmatchedRows =
+    unmatched.length === 0 ? null : (
+      <Stack gap={4}>
+        {unmatched.map((m) => {
+          const database = databases.find((d) => d.Id === m.DatabaseId);
+          const serverName = (id: number) =>
+            servers.find((s) => s.Id === id)?.Name ?? `server ${id}`;
+          const name = database?.DatabaseName ?? `database ${m.DatabaseId}`;
+          return (
+            <Group key={mappingKey(m)} gap="xs" wrap="nowrap">
+              <Text size="sm" c="red">
+                <Text span ff="monospace">
+                  {name}
+                </Text>
+                {database
+                  ? ` is mapped under ${serverName(m.DatabaseServerId)} but is now on ${serverName(database.DatabaseServerId)}. Remove it, then tick it under its server.`
+                  : ` is mapped under ${serverName(m.DatabaseServerId)} but no longer exists. Remove it.`}
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="red"
+                onClick={() => remove(m)}
+                aria-label={`Remove mapping to ${name}`}
+              >
+                Remove
+              </Button>
+            </Group>
+          );
+        })}
+      </Stack>
+    );
+
   if (servers.length === 0) {
     return (
       <Text size="sm" c="dimmed">
@@ -63,6 +117,7 @@ export function DatabaseMappingsEditor({
 
   return (
     <Stack gap="md">
+      {unmatchedRows}
       {servers.map((server) => {
         const dbs = dbsByServer.get(server.Id) ?? [];
         return (

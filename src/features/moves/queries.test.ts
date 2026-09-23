@@ -177,10 +177,24 @@ describe("whyDatabaseNotMovable with migrations", () => {
 });
 
 describe("whyDatabaseNotMovable with static grants", () => {
+  const ready = (entries: [number, number][]) => ({
+    counts: new Map(entries),
+    status: "ready" as const,
+  });
+
   it("refuses a database static users hold privileges on, as the service does", () => {
-    expect(whyDatabaseNotMovable(database, [], [], new Map([[100, 2]]))).toBe(
+    expect(whyDatabaseNotMovable(database, [], [], ready([[100, 2]]))).toBe(
       "2 static user privilege(s) are held on it, and moves do not carry static users yet",
     );
-    expect(whyDatabaseNotMovable(database, [], [], new Map([[101, 1]]))).toBeNull();
+    expect(whyDatabaseNotMovable(database, [], [], ready([[101, 1]]))).toBeNull();
+  });
+
+  it("does not take grants as absent while they load, or when a read failed", () => {
+    expect(
+      whyDatabaseNotMovable(database, [], [], { counts: new Map(), status: "loading" }),
+    ).toBe("checking static user grants");
+    expect(
+      whyDatabaseNotMovable(database, [], [], { counts: new Map(), status: "error" }),
+    ).toBe("static user grants could not be read, so it cannot be checked");
   });
 });

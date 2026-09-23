@@ -14,6 +14,7 @@ import { IconTrash } from "@tabler/icons-react";
 import { useMemo } from "react";
 
 import {
+  type CustomerMove,
   type DatabaseInfoItem,
   type DatabasePrivilegeInfo,
   type DatabasePrivileges,
@@ -22,7 +23,7 @@ import {
   emptyPrivileges,
 } from "@/api/types";
 
-import { GRANTABLE_PRIVILEGES, whyNotGrantableStatus } from "./privileges";
+import { GRANTABLE_PRIVILEGES, whyNotGrantable } from "./privileges";
 
 interface PrivilegesEditorProps {
   servers: DatabaseServerInfoItem[];
@@ -35,6 +36,8 @@ interface PrivilegesEditorProps {
    * and one removed would keep its grants, while the page reported success.
    */
   lockServers?: boolean;
+  /** Customer moves, so a database with an unsettled move is not offered. */
+  moves?: CustomerMove[];
 }
 
 // No GRANT column: the service never grants WITH GRANT OPTION.
@@ -46,6 +49,7 @@ export function PrivilegesEditor({
   value,
   onChange,
   lockServers = false,
+  moves = [],
 }: PrivilegesEditorProps) {
   const dbsByServer = useMemo(() => {
     const map = new Map<number, DatabaseInfoItem[]>();
@@ -201,7 +205,7 @@ export function PrivilegesEditor({
                     // refusal refuses the whole request. An unticked one cannot be
                     // picked; a ticked one stays untickable, since it has to be
                     // removed before anything else here can be saved.
-                    const unavailable = whyNotGrantableStatus(db.Status);
+                    const unavailable = whyNotGrantable(db, moves);
                     const selected = selectedDbIds.has(db.Id);
                     return (
                       <Checkbox

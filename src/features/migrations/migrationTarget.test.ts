@@ -251,10 +251,26 @@ describe("whyDatabaseNotSelectable with sessions and moves", () => {
     expect(whyDatabaseNotSelectable(mine, 1042, { sessions: expired, now })).toBeNull();
   });
 
-  it("refuses a database with a planned move, which is still active", () => {
-    const planned = [{ DatabaseId: 10, Status: "planned" }] as CustomerMove[];
-    expect(whyDatabaseNotSelectable(mine, 1042, { moves: planned })).toBe(
-      "a customer move of it is in progress",
-    );
+  it("refuses a database with any unsettled move, planned and flipped included", () => {
+    for (const status of ["planned", "copying", "flipped"]) {
+      const moves = [{ DatabaseId: 10, Status: status }] as CustomerMove[];
+      expect(whyDatabaseNotSelectable(mine, 1042, { moves })).toBe(
+        "a customer move of it is still in progress or can still be rolled back",
+      );
+    }
+    const settledUndropped = [
+      { DatabaseId: 10, Status: "settled", SourceDroppedDateTimeUtc: null },
+    ] as CustomerMove[];
+    expect(
+      whyDatabaseNotSelectable(mine, 1042, { moves: settledUndropped }),
+    ).not.toBeNull();
+    const done = [
+      {
+        DatabaseId: 10,
+        Status: "settled",
+        SourceDroppedDateTimeUtc: "2026-09-23T00:00:00Z",
+      },
+    ] as CustomerMove[];
+    expect(whyDatabaseNotSelectable(mine, 1042, { moves: done })).toBeNull();
   });
 });

@@ -753,7 +753,7 @@ describe("demo mint refuses around a move", () => {
         ExpiresInMinutes: 60,
       });
       expect(messageOf(existing.data)).toBe(
-        "The selected database has a customer move in progress. Wait for it to finish or cancel it.",
+        "The selected database has a customer move that is still in progress or can still be rolled back. Let it finish or cancel it, or once it has cut over, settle it by dropping the source or roll it back, then try again.",
       );
       const provision = await call("post", "/create-migration-session", {
         DatabaseServerId: 2,
@@ -769,5 +769,88 @@ describe("demo mint refuses around a move", () => {
     } finally {
       demoStore.customerMoves = demoStore.customerMoves.filter((m) => m.Id !== 991);
     }
+  });
+});
+
+describe("demo round 14 refusals around unsettled moves", () => {
+  it("refuses a rollback while static users hold grants on the database", async () => {
+    const flipped = {
+      ...demoStore.customerMoves[0],
+      Id: 992,
+      DatabaseId: 100,
+      Status: "flipped",
+      SourceDatabaseName: "tenant_acme",
+      SourceDroppedDateTimeUtc: null,
+    } as CustomerMove;
+    demoStore.customerMoves = [flipped, ...demoStore.customerMoves];
+    try {
+      const res = await call("post", "/roll-back-customer-move/992");
+      expect(res.data).toEqual(
+        expect.objectContaining({
+          Success: false,
+          Message:
+            "This move cannot be rolled back while static users hold privileges on the database, because their grants are on the target server and would be left behind. Remove those static user grants first, then try again. Nothing was changed.",
+        }),
+      );
+      expect(flipped.Status).toBe("flipped");
+
+      // And a static grant on a database with a flipped move is refused.
+      const grant = await call("put", "/update-static-database-user", {
+        Id: 1,
+        UserName: "static_acme_etl",
+        GenerateNewPassword: false,
+        NewDescription: null,
+        Servers: [{ ServerId: 1, Databases: demoStore.staticUserPrivileges[1] }],
+      });
+      const data = grant.data as UpdateStaticDatabaseUserResponse;
+      expect(data.Message).toBe("Refused");
+      expect(data.Servers![0]!.Databases![0]!.Errors![0]).toBe(
+        "'tenant_acme' has a customer move that is still in progress or can still be rolled back. Let it finish or cancel it, or once it has cut over, settle it by dropping the source or roll it back, then try again.",
+      );
+    } finally {
+      demoStore.customerMoves = demoStore.customerMoves.filter((m) => m.Id !== 992);
+    }
+  });
+});
+
+describe("demo answers as the service for unknown ids and taken emails", () => {
+  it("answers 404 with a plain string for an unknown database", async () => {
+    const res = await call("get", "/get-database-info/9999");
+    expect(res.status).toBe(404);
+    expect(res.data).toBe("Database info with ID 9999 not found.");
+  });
+
+  it("refuses an email another user has, whatever its case, but not the user's own", async () => {
+    const [first, second] = demoStore.authorizedUsers;
+    const taken = await call("post", "/create-user", {
+      Email: first!.Email.toUpperCase(),
+      Password: "pw",
+      UseStaticHost: false,
+      StaticHost: null,
+      MaxLoginInstances: 1,
+      DatabaseMappings: [],
+    });
+    expect(taken.status).toBe(400);
+    expect(taken.data).toEqual({ Status: "EMAIL_ALREADY_EXISTS_ERROR" });
+
+    const onto = await call("put", "/update-user", {
+      UserId: second!.Id,
+      Email: first!.Email,
+      UseStaticHost: second!.UseStaticHost,
+      StaticHost: second!.StaticHost,
+      MaxLoginInstances: 1,
+      DatabaseMappings: [],
+    });
+    expect(onto.status).toBe(400);
+
+    const own = await call("put", "/update-user", {
+      UserId: first!.Id,
+      Email: first!.Email.toUpperCase(),
+      UseStaticHost: first!.UseStaticHost,
+      StaticHost: first!.StaticHost,
+      MaxLoginInstances: first!.MaxLoginInstances,
+      DatabaseMappings: first!.DatabaseMappings,
+    });
+    expect(own.status).toBe(200);
   });
 });

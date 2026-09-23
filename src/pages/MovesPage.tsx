@@ -377,8 +377,21 @@ export function MovesPage() {
     targetName.trim() && !isSafeDatabaseName(targetName)
       ? "Use letters, digits and underscores, starting with a letter"
       : null;
+  // Checked again at submit for the chosen database: its option may have been
+  // picked before the grant counts, sessions or moves had finished loading.
+  const selectedRefusal = selectedDatabase
+    ? whyDatabaseNotMovable(
+        selectedDatabase,
+        moves.data ?? [],
+        sessions.data ?? [],
+        staticGrants,
+      )
+    : null;
   const canPlan =
-    databaseId !== "" && targetServerId !== "" && targetNameError === null;
+    databaseId !== "" &&
+    targetServerId !== "" &&
+    targetNameError === null &&
+    selectedRefusal === null;
 
   return (
     <Container size="xl" py="md">
@@ -464,6 +477,11 @@ export function MovesPage() {
               };
             })}
             value={databaseId}
+            error={
+              selectedRefusal
+                ? `This database cannot be moved: ${selectedRefusal}.`
+                : undefined
+            }
             onChange={(value) => {
               setDatabaseId(value ?? "");
               // The target list depends on where the customer currently is, so a

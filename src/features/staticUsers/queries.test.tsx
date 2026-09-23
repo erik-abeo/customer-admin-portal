@@ -88,9 +88,9 @@ describe("useStaticGrantCounts", () => {
     const { result } = renderHook(() => useStaticGrantCounts(true), {
       wrapper: wrapperFor(new QueryClient()),
     });
-    await waitFor(() => expect(result.current).toBeDefined());
-    expect(result.current?.get(100)).toBe(2);
-    expect(result.current?.get(101)).toBe(1);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.counts.get(100)).toBe(2);
+    expect(result.current.counts.get(101)).toBe(1);
   });
 
   it("reads nothing while disabled", () => {
@@ -98,7 +98,18 @@ describe("useStaticGrantCounts", () => {
     const { result } = renderHook(() => useStaticGrantCounts(false), {
       wrapper: wrapperFor(new QueryClient()),
     });
-    expect(result.current).toBeUndefined();
+    expect(result.current.status).toBe("idle");
     expect(staticUsersApi.list).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed read as an error, not as no grants", async () => {
+    vi.mocked(staticUsersApi.list).mockResolvedValue([{ Id: 1 }] as never);
+    vi.mocked(staticUsersApi.get).mockRejectedValue(new Error("500"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useStaticGrantCounts(true), {
+      wrapper: wrapperFor(client),
+    });
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.counts.size).toBe(0);
   });
 });

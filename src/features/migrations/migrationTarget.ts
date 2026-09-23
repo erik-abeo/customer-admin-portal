@@ -6,6 +6,7 @@ import type {
   MigrationSessionItem,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
+import { isUnsettledMove } from "@/features/moves/queries";
 import { whyServerNotTakingCustomers } from "@/features/databaseServers/status";
 
 /**
@@ -108,12 +109,14 @@ export const whyDatabaseNotSelectable = (
         (s.Status === "pending" && Date.parse(s.ExpiresDateTimeUtc) > now)),
   );
   if (liveKey) return "it already has a live migration key";
-  const activeMove = (context.moves ?? []).some(
-    (m) =>
-      m.DatabaseId === database.Id &&
-      ["planned", "draining", "copying", "verifying"].includes(m.Status ?? ""),
+  // Unsettled, as the service counts it: in progress, cut over and still able
+  // to roll back, or settled with its source drop unfinished. Rows streamed in
+  // before a rollback would land on the target and be left behind.
+  const unsettled = (context.moves ?? []).some(
+    (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
   );
-  if (activeMove) return "a customer move of it is in progress";
+  if (unsettled)
+    return "a customer move of it is still in progress or can still be rolled back";
   const customer = Number(crystalPmId);
   if (
     crystalPmId !== "" &&

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldSweepAfterFailedStart } from "./cleanupPolicy";
+import { isApiCommandLine, shouldSweepAfterFailedStart } from "./cleanupPolicy";
 
 describe("shouldSweepAfterFailedStart", () => {
   it("never sweeps when the test servers were not both verified", () => {
@@ -16,5 +16,26 @@ describe("shouldSweepAfterFailedStart", () => {
 
   it("keeps everything when the run asked to", () => {
     expect(shouldSweepAfterFailedStart(true, "1")).toBe(false);
+  });
+});
+
+describe("isApiCommandLine", () => {
+  it("recognises dotnet running the API", () => {
+    expect(
+      isApiCommandLine(
+        '"C:\\Program Files\\dotnet\\dotnet.exe" ClientRemoteDatabaseAccessAPI.dll --urls http://127.0.0.1:5199',
+      ),
+    ).toBe(true);
+    expect(
+      isApiCommandLine(
+        "dotnet /tmp/cpm-portal-live-api-ab12/ClientRemoteDatabaseAccessAPI.dll",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses anything else that has reused the PID", () => {
+    expect(isApiCommandLine("node server.js")).toBe(false);
+    expect(isApiCommandLine("dotnet OtherService.dll")).toBe(false);
+    expect(isApiCommandLine("")).toBe(false);
   });
 });

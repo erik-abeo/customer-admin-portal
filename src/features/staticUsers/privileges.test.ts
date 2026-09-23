@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type CustomerMove,
   type DatabaseInfoItem,
   type DatabaseServerInfoItem,
   emptyPrivileges,
@@ -96,7 +97,7 @@ describe("static user privileges", () => {
         moving,
       ),
     ).toBe(
-      "Untick tenant_acme on east-1 (a customer move is in progress): static users can only be granted an active database, and the service refuses the whole change otherwise.",
+      "Untick tenant_acme on east-1 (a customer move is in progress): static users can only be granted an active database with no unsettled move, and the service refuses the whole change otherwise.",
     );
   });
 
@@ -128,6 +129,33 @@ describe("static user privileges", () => {
       ),
     ).toBe(
       "'tenant_acme' is not on server 1. Re-pick it under the server it is on. Remove it from this server.",
+    );
+  });
+
+  it("flags a held database with an unsettled move, a flipped one included", () => {
+    const active = [
+      { Id: 100, DatabaseServerId: 1, DatabaseName: "tenant_acme", Status: "active" },
+    ] as DatabaseInfoItem[];
+    const flipped = [{ DatabaseId: 100, Status: "flipped" }] as CustomerMove[];
+    expect(
+      whyPrivilegesIncomplete(
+        [
+          {
+            ServerId: 1,
+            Databases: [
+              {
+                DatabaseId: 100,
+                Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+              },
+            ],
+          },
+        ],
+        servers,
+        active,
+        flipped,
+      ),
+    ).toContain(
+      "tenant_acme on east-1 (a customer move of it is still in progress or can still be rolled back)",
     );
   });
 });

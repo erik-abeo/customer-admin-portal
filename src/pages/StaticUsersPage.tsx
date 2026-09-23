@@ -24,7 +24,7 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { staticUsersApi } from "@/api/staticUsers";
 import type {
@@ -42,6 +42,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { SortableHeader } from "@/components/common/SortableHeader";
 import { features } from "@/config/env";
+import { useCustomerMoves } from "@/features/moves/queries";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { useDatabases } from "@/features/databases/queries";
 import { StaticUserForm } from "@/features/staticUsers/StaticUserForm";
@@ -52,6 +53,7 @@ import {
   useUpdateStaticUser,
 } from "@/features/staticUsers/queries";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { createLatestRequest } from "@/lib/latestRequest";
 import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import {
@@ -125,6 +127,9 @@ export function StaticUsersPage() {
   const list = useStaticUsers();
   const servers = useDatabaseServers();
   const databases = useDatabases();
+  // A database with an unsettled move cannot be granted. Moves exist only with
+  // the remote-database pages on, so they are read only then.
+  const moves = useCustomerMoves({ enabled: features.migrations });
   const create = useCreateStaticUser();
   const update = useUpdateStaticUser();
   const remove = useDeleteStaticUser();
@@ -206,7 +211,12 @@ export function StaticUsersPage() {
     downloadCsv(`static-users-${stamp}.csv`, csv);
   }, [table.filteredRows, serverNameById]);
 
+  // Loading a user takes several requests. If Edit is clicked on another user
+  // before they finish, only the last one clicked may open the form.
+  const editRequests = useRef(createLatestRequest()).current;
+
   const beginEdit = async (anyRowId: number) => {
+    const ticket = editRequests.begin();
     try {
       const detail = await staticUsersApi.get(anyRowId);
       // The detail endpoint returns one server's privileges; to edit across
@@ -221,10 +231,11 @@ export function StaticUsersPage() {
         ServerId: sd.DatabaseServerId,
         Databases: (sd.DatabasePrivileges ?? []) as DatabasePrivilegeInfo[],
       }));
+      if (!editRequests.isLatest(ticket)) return;
       setEditTarget(detail);
       setEditInitialServers(initialServers);
     } catch (e) {
-      notifyError(e, "Failed to load user details");
+      if (editRequests.isLatest(ticket)) notifyError(e, "Failed to load user details");
     }
   };
 
@@ -421,6 +432,7 @@ export function StaticUsersPage() {
         <StaticUserForm
           servers={servers.data ?? []}
           databases={databases.data ?? []}
+          moves={moves.data ?? []}
           submitLabel="Create user"
           onCancel={createCtl.close}
           submitting={create.isPending}
@@ -481,6 +493,7 @@ export function StaticUsersPage() {
           <StaticUserForm
             servers={servers.data ?? []}
             databases={databases.data ?? []}
+            moves={moves.data ?? []}
             initial={editTarget}
             initialServers={editInitialServers ?? []}
             submitLabel="Save changes"

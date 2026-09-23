@@ -28,7 +28,7 @@ to credit reporters in the release notes if you'd like attribution.
 
 ### Out-of-scope
 
-- Reports against the upstream `ClientRemoteDatabaseAccessAPI` or Supertokens —
+- Reports against the upstream `ClientRemoteDatabaseAccessAPI` or Supertokens:
   please file those with the upstream projects.
 - Self-XSS that requires the operator to paste hostile input into their own
   console / DevTools.

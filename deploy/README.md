@@ -112,6 +112,20 @@ There is no runtime configuration. The container is nginx serving static
 files, so environment variables and Secrets Manager entries set on the task do
 not reach the SPA, and changing any value above means building a new image.
 
+## Networking
+
+The Terraform runs the tasks in private subnets with no public IP
+(`assign_public_ip = false`), and nginx proxies `/api/` to the gateway's public
+hostname, `remotedb.crystalpm.net`. So the subnets need a way to reach it:
+
+- a NAT gateway on a route out to the internet, or
+- private DNS that resolves the gateway's name to a private address, and a route
+  to that address (peering, a transit gateway or the same VPC).
+
+The tasks also have to pull the image from ECR and write logs: through the NAT
+gateway, or through VPC endpoints for ECR (`ecr.api`, `ecr.dkr`), S3 (for the
+image layers) and CloudWatch Logs. Without either, a task cannot start.
+
 ## TLS and access
 
 The container serves plain HTTP on 8080. Terminate TLS at the load balancer in
@@ -145,6 +159,13 @@ The shipped `nginx.conf` enforces:
 The SPA reaches the API only through the `/api/` proxy, on its own origin. If
 you change the gateway the proxy points at, change `connect-src` with it (see the
 comment in `nginx.conf`).
+
+The proxy resolves the gateway's name at request time, through
+`resolver 169.254.169.253 valid=60s` in `nginx.conf`: the Amazon-provided DNS
+server, reachable from any task in a VPC, Fargate included. A change of the
+gateway's address is then picked up within a minute, without restarting the
+tasks. Outside AWS, set a resolver your network has (for example `127.0.0.11`
+under Docker); with an unreachable one every `/api/` call fails with a 502.
 
 The gateway then forwards `/My` to the service, so every portal call also
 depends on that hop. The gateway config in remote-database-system

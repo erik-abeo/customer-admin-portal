@@ -245,6 +245,11 @@ resource "aws_lb_listener_rule" "this" {
 # ---- Service -----------------------------------------------------------
 
 resource "aws_ecs_service" "this" {
+  # The target group is attached to the ALB only through the listener rule, and
+  # ECS refuses a service whose target group has no load balancer yet, so the
+  # rule has to exist first.
+  depends_on = [aws_lb_listener_rule.this]
+
   name            = "customer-admin-portal"
   cluster         = var.ecs_cluster_name
   task_definition = aws_ecs_task_definition.this.arn

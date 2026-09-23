@@ -11,7 +11,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   authSql,
-  DB_PASSWORD,
+  passwordForPort,
   MARIADB_CONTAINER,
   MARIADB_PORT,
   MYSQL_CONTAINER,
@@ -115,7 +115,7 @@ async function registerServer(
   await dialog.getByLabel(/^Local server address/).fill("127.0.0.1");
   await dialog.getByLabel(/^Server port/).fill(String(port));
   await dialog.getByLabel(/^Administrator username/).fill("root");
-  await dialog.getByLabel(/^Administrator password/).fill(DB_PASSWORD);
+  await dialog.getByLabel(/^Administrator password/).fill(passwordForPort(port));
   await dialog.getByLabel(/^Certificate \(PEM\)/).fill(certificate);
 
   const create = dialog.getByRole("button", { name: /^Create server$/ });

@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { shouldSweepAfterFailedStart } from "./cleanupPolicy";
+import { isApiCommandLine, shouldSweepAfterFailedStart } from "./cleanupPolicy";
 
 export const MYSQL_CONTAINER = "cpm-api-mysql84-test";
 export const MARIADB_CONTAINER = "cpm-api-mariadb106-test";
@@ -55,8 +55,22 @@ function hostPort(container: string): number {
 
 export const MYSQL_PORT = hostPort(MYSQL_CONTAINER);
 export const MARIADB_PORT = hostPort(MARIADB_CONTAINER);
-export const DB_PASSWORD =
+/**
+ * The root passwords, one per container, read from the same variables the
+ * API's test compose file uses, so overriding one there works here too.
+ */
+export const MYSQL_PASSWORD =
+  process.env.CPM_API_TEST_MYSQL_PASSWORD ?? "CpmApiTest2026";
+export const MARIADB_PASSWORD =
   process.env.CPM_API_TEST_MARIADB_PASSWORD ?? "CpmApiTest2026";
+
+/** The root password for a container. */
+export const passwordFor = (container: string): string =>
+  container === MARIADB_CONTAINER ? MARIADB_PASSWORD : MYSQL_PASSWORD;
+
+/** The root password for the server published on a port. */
+export const passwordForPort = (port: number): string =>
+  port === MARIADB_PORT ? MARIADB_PASSWORD : MYSQL_PASSWORD;
 
 /** Everything this suite creates starts with this, and nothing else does. */
 export const PREFIX = "cpmp_";
@@ -140,7 +154,7 @@ export function sql(container: string, statements: string, database?: string): s
     container,
     client,
     "-uroot",
-    `-p${DB_PASSWORD}`,
+    `-p${passwordFor(container)}`,
     "-N",
     "-B",
   ];
@@ -179,6 +193,31 @@ function isAlive(pid: number | undefined): boolean {
   }
 }
 
+/** The command line a process was started with, or null if it cannot be read. */
+function commandLineOf(pid: number): string | null {
+  try {
+    if (process.platform === "win32")
+      return execFileSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+        ],
+        { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
+    return readFileSync(`/proc/${pid}/cmdline`, "utf-8").replace(/\0/g, " ").trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a PID is a dotnet process running this suite's API. */
+function isOurApi(pid: number): boolean {
+  const commandLine = commandLineOf(pid);
+  return commandLine !== null && isApiCommandLine(commandLine);
+}
+
 function readOwner(): LockOwner | null {
   try {
     return JSON.parse(readFileSync(OWNER_FILE, "utf-8")) as LockOwner;
@@ -204,10 +243,16 @@ async function acquireLock(): Promise<void> {
       mkdirSync(LOCK);
       writeOwner({ ownerPid: process.pid });
       return;
-    } catch {
+    } catch (error) {
+      // Only "it already exists" means somebody holds the lock; anything else
+      // (no permission, a bad path) is a real failure to report.
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const owner = readOwner();
       if (owner && !isAlive(owner.ownerPid)) {
-        if (owner.apiPid && isAlive(owner.apiPid)) {
+        // A PID can be reused once its process ends, so it is killed only if
+        // it is still the API this suite started, not whatever has the number
+        // now.
+        if (owner.apiPid && isAlive(owner.apiPid) && isOurApi(owner.apiPid)) {
           try {
             process.kill(owner.apiPid);
           } catch {
@@ -257,7 +302,7 @@ async function assertTestServer(container: string, port: number): Promise<void> 
       host: "127.0.0.1",
       port,
       user: "root",
-      password: DB_PASSWORD,
+      password: passwordFor(container),
       // The test servers' certificates are self-signed; what is being checked
       // is which server answers, which the hostname comparison settles.
       ssl: { rejectUnauthorized: false },
@@ -289,7 +334,7 @@ function applyScript(file: string): void {
     MARIADB_CONTAINER,
     "mariadb",
     "-uroot",
-    `-p${DB_PASSWORD}`,
+    `-p${MARIADB_PASSWORD}`,
     AUTH_DATABASE,
     "-e",
     `source /tmp/${name}`,
@@ -365,7 +410,7 @@ async function startApi(
   ))
     rmSync(path.join(directory, file), { force: true });
 
-  const authConnection = `Server=127.0.0.1;Port=${MARIADB_PORT};User ID=root;Password=${DB_PASSWORD};Database=${AUTH_DATABASE};SslMode=Required`;
+  const authConnection = `Server=127.0.0.1;Port=${MARIADB_PORT};User ID=root;Password=${MARIADB_PASSWORD};Database=${AUTH_DATABASE};SslMode=Required`;
   const fieldKey = randomBytes(16).toString("hex");
 
   const env: NodeJS.ProcessEnv = {
