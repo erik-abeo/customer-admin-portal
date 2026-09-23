@@ -7,4 +7,4 @@ private_subnet_ids        = ["subnet-aaa", "subnet-bbb", "subnet-ccc"]
 alb_listener_arn          = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/internal/abc/def"
 alb_security_group_id     = "sg-0123456789abcdef0"
 host_header               = "admin.example.internal"
-image_tag                 = "latest"
+image_tag                 = "1.4.0-3fb7c24" # immutable: a new tag per release

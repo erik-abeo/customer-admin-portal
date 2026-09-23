@@ -70,10 +70,25 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
   light: {
     "--mantine-color-dimmed": "var(--mantine-color-gray-7)",
     "--mantine-color-gray-light-color": "var(--mantine-color-gray-7)",
+    // Red text, field errors and light red buttons default to red 6 (#fa5252),
+    // 3.3:1 on white and 2.9:1 on a light button's tint; red 9 is 5.5:1 and
+    // 4.9:1. White on a filled red button was 3.3:1 on red 6; red 9 is 5.5:1,
+    // and hover drops to red 8, 4.5:1.
+    "--mantine-color-red-text": "var(--mantine-color-red-9)",
+    "--mantine-color-error": "var(--mantine-color-red-9)",
+    "--mantine-color-red-light-color": "var(--mantine-color-red-9)",
+    "--mantine-color-red-filled": "var(--mantine-color-red-9)",
+    "--mantine-color-red-filled-hover": "var(--mantine-color-red-8)",
   },
   dark: {
     "--mantine-color-dimmed": "var(--mantine-color-dark-1)",
     "--mantine-color-anchor": "var(--mantine-color-crystal-3)",
+    // Field errors default to red 8 (#e03131), 3.0:1 on a dark card, and red
+    // text and light red buttons are no better; red 4 is 5.9:1 on the card and
+    // 5.3:1 on a light button's tint.
+    "--mantine-color-red-text": "var(--mantine-color-red-4)",
+    "--mantine-color-error": "var(--mantine-color-red-4)",
+    "--mantine-color-red-light-color": "var(--mantine-color-red-4)",
   },
 });
 

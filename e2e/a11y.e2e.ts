@@ -28,20 +28,27 @@ import { installApiMocks } from "./helpers/mockApi";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-async function scan(page: Page, contextLabel: string) {
+async function scan(
+  page: Page,
+  contextLabel: string,
+  options: { modalOpen?: boolean } = {},
+) {
+  const disabled = ["landmark-one-main", "region"];
+  if (options.modalOpen) {
+    // Mantine renders a modal's title bar as a <header>, which axe counts as a
+    // second banner because it does not honour aria-modal. Assistive technology
+    // does: the page behind a modal is out of its reach while it is open.
+    disabled.push("landmark-no-duplicate-banner", "landmark-unique");
+  }
   const builder = new AxeBuilder({ page })
     // We include `best-practice` so axe's heading-order rule fires on
     // every page — the WCAG tags alone don't cover hierarchy regressions.
     // We then disable the rules that are already handled elsewhere or
     // that produce false positives against Mantine's components.
     .withTags([...WCAG_TAGS, "best-practice"])
-    .disableRules([
-      // The login screen sits outside <main> intentionally; landmark
-      // assertions on every page would be redundant with the AppLayout
-      // tests.
-      "landmark-one-main",
-      "region",
-    ]);
+    // The login screen sits outside <main> intentionally; landmark assertions
+    // on every page would be redundant with the AppLayout tests.
+    .disableRules(disabled);
 
   const results = await builder.analyze();
 
@@ -136,6 +143,25 @@ test.describe("Accessibility (post-auth)", () => {
       await page.goto(path);
       await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
       await scan(page, `${path} (dark)`);
+    });
+  }
+
+  // Field errors are red text, which is where contrast has failed before, so a
+  // form showing them is checked in both schemes.
+  for (const scheme of ["light", "dark"] as const) {
+    test(`a form showing field errors is accessible (${scheme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto("/databases");
+      await page
+        .getByRole("button", { name: /Add database/i })
+        .first()
+        .click();
+      const dialog = page.getByRole("dialog", { name: /Add database/i });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel(/^Database name/).fill("");
+      await dialog.getByRole("button", { name: /Create database/i }).click();
+      await expect(dialog.getByText(/Database name is required/i)).toBeVisible();
+      await scan(page, `field errors (${scheme})`, { modalOpen: true });
     });
   }
 });

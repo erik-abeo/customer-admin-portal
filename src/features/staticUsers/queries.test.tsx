@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { staticUsersApi } from "@/api/staticUsers";
 
-import { useCreateStaticUser, useUpdateStaticUser } from "./queries";
+import {
+  useCreateStaticUser,
+  useStaticGrantCounts,
+  useUpdateStaticUser,
+} from "./queries";
 
 vi.mock("@/api/staticUsers", () => ({
   staticUsersApi: {
@@ -65,5 +69,36 @@ describe("static user mutations", () => {
 
     act(() => result.current.reset());
     await waitFor(() => expect(cacheHolds(client, "Rotated-Secret-2")).toBe(false));
+  });
+});
+
+describe("useStaticGrantCounts", () => {
+  it("counts each database's static grants once every user's detail has loaded", async () => {
+    vi.mocked(staticUsersApi.list).mockResolvedValue([{ Id: 1 }, { Id: 2 }] as never);
+    vi.mocked(staticUsersApi.get).mockImplementation(
+      async (id: number) =>
+        ({
+          Id: id,
+          DatabasePrivileges:
+            id === 1
+              ? [{ DatabaseId: 100 }, { DatabaseId: 101 }]
+              : [{ DatabaseId: 100 }],
+        }) as never,
+    );
+    const { result } = renderHook(() => useStaticGrantCounts(true), {
+      wrapper: wrapperFor(new QueryClient()),
+    });
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(result.current?.get(100)).toBe(2);
+    expect(result.current?.get(101)).toBe(1);
+  });
+
+  it("reads nothing while disabled", () => {
+    vi.mocked(staticUsersApi.list).mockClear();
+    const { result } = renderHook(() => useStaticGrantCounts(false), {
+      wrapper: wrapperFor(new QueryClient()),
+    });
+    expect(result.current).toBeUndefined();
+    expect(staticUsersApi.list).not.toHaveBeenCalled();
   });
 });

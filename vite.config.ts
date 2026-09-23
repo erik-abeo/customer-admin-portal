@@ -54,7 +54,9 @@ export default defineConfig({
     environment: "happy-dom",
     globals: true,
     css: false,
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // The live suite's pure helpers are unit-tested too; stack.ts itself runs
+    // docker when imported, so only its separable decisions are covered here.
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "e2e/live/**/*.test.ts"],
     setupFiles: ["./src/test/setup.ts"],
     coverage: {
       provider: "v8",

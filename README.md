@@ -200,7 +200,7 @@ public/
   favicon.svg               # SVG fallback favicon
   robots.txt                # noindex (private admin tool)
 Dockerfile                  # Multi-stage build to nginx-unprivileged
-.github/workflows/ci.yml    # format + lint + typecheck + test + build, Playwright, Lighthouse, Docker
+.github/workflows/ci.yml    # audit + format + lint + typecheck + test + build, Playwright, Lighthouse, Docker build
 .editorconfig               # Whitespace / charset baseline for all editors
 .nvmrc                      # Pinned Node version
 LICENSE                     # Proprietary, internal-use-only license
@@ -304,10 +304,10 @@ The included `Dockerfile` produces a multi-stage build that ends at
 docker build \
   --build-arg VITE_API_BASE_URL=/api \
   --build-arg VITE_APP_NAME="CrystalPM Admin Portal" \
-  -t customer-admin-portal:latest .
+  -t customer-admin-portal:$(git rev-parse --short HEAD) .
 
 # Run locally; visit http://localhost:8080
-docker run --rm -p 8080:8080 customer-admin-portal:latest
+docker run --rm -p 8080:8080 customer-admin-portal:$(git rev-parse --short HEAD)
 ```
 
 When the SPA is configured with `VITE_API_BASE_URL=/api`, the included
@@ -323,8 +323,9 @@ against the image's CA bundle.
 - HSTS, `X-Content-Type-Options`, `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer`, `Permissions-Policy`, and a strict
   `Content-Security-Policy` (no inline scripts; `connect-src` allows `'self'`,
-  the gateway origin `https://remotedb.crystalpm.net` and
-  `https://*.ingest.sentry.io`). The headers live in
+  the gateway origin `https://remotedb.crystalpm.net`, and Sentry's ingest
+  hosts `https://*.ingest.sentry.io`, `https://*.ingest.us.sentry.io` and
+  `https://*.ingest.de.sentry.io`). The headers live in
   `deploy/security-headers.conf`.
 - Long-lived caching for hashed assets, `no-store` for `index.html`.
 - gzip for text-y content types.

@@ -36,6 +36,7 @@ import {
 } from "@/features/databaseServers/status";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import { useMigrationSessions } from "@/features/migrations/queries";
+import { useStaticGrantCounts } from "@/features/staticUsers/queries";
 import {
   canCancelMove,
   needsWorkByHand,
@@ -105,6 +106,9 @@ export function MovesPage() {
   const dropSource = useDropCustomerMoveSource();
 
   const [formOpen, setFormOpen] = useState(false);
+  // Static grants refuse a move of their database. Read only while the form is
+  // open, since it takes one request per static user.
+  const staticGrants = useStaticGrantCounts(formOpen);
   const [databaseId, setDatabaseId] = useState<string>("");
   const [targetServerId, setTargetServerId] = useState<string>("");
   const [targetName, setTargetName] = useState("");
@@ -449,6 +453,7 @@ export function MovesPage() {
                 d,
                 moves.data ?? [],
                 sessions.data ?? [],
+                staticGrants,
               );
               return {
                 value: String(d.Id),

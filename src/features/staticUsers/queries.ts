@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { staticUsersApi } from "@/api/staticUsers";
 import type {
@@ -24,6 +29,36 @@ export function useStaticUser(id: number | undefined) {
     queryFn: () => staticUsersApi.get(id as number),
     enabled: id !== undefined,
   });
+}
+
+/**
+ * How many static user privileges each database carries, keyed by database id,
+ * or undefined until every user's grants have loaded. Counted as the service
+ * counts them for a move's refusal: one per user row per database.
+ *
+ * The list does not carry grants, so each row's detail is read; it shares the
+ * detail query with the edit form. Pass `enabled` false to read nothing.
+ */
+export function useStaticGrantCounts(
+  enabled: boolean,
+): Map<number, number> | undefined {
+  const list = useQuery({
+    queryKey: KEYS.all,
+    queryFn: () => staticUsersApi.list(),
+    enabled,
+  });
+  const details = useQueries({
+    queries: (enabled ? (list.data ?? []) : []).map((row) => ({
+      queryKey: KEYS.detail(row.Id),
+      queryFn: () => staticUsersApi.get(row.Id),
+    })),
+  });
+  if (!enabled || !list.data || details.some((d) => !d.data)) return undefined;
+  const counts = new Map<number, number>();
+  for (const detail of details)
+    for (const grant of detail.data?.DatabasePrivileges ?? [])
+      counts.set(grant.DatabaseId, (counts.get(grant.DatabaseId) ?? 0) + 1);
+  return counts;
 }
 
 export function useCreateStaticUser() {

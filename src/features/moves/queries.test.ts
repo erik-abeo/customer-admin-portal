@@ -175,3 +175,12 @@ describe("whyDatabaseNotMovable with migrations", () => {
     expect(whyDatabaseNotMovable(database, [], finished)).toBeNull();
   });
 });
+
+describe("whyDatabaseNotMovable with static grants", () => {
+  it("refuses a database static users hold privileges on, as the service does", () => {
+    expect(whyDatabaseNotMovable(database, [], [], new Map([[100, 2]]))).toBe(
+      "2 static user privilege(s) are held on it, and moves do not carry static users yet",
+    );
+    expect(whyDatabaseNotMovable(database, [], [], new Map([[101, 1]]))).toBeNull();
+  });
+});

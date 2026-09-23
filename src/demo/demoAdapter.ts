@@ -274,6 +274,9 @@ function mismatchedMappings(
   };
 }
 
+/** Move statuses the service counts as in progress (CustomerMoveRepository.ActiveStatuses). */
+const ACTIVE_MOVE_STATUSES = new Set(["planned", "draining", "copying", "verifying"]);
+
 function mintRefusal(req: CreateMigrationSessionRequest): string | null {
   // As the service checks it: a stale server id is a refusal, and only an
   // available server takes a new customer. A key against a database already
@@ -299,6 +302,16 @@ function mintRefusal(req: CreateMigrationSessionRequest): string | null {
     );
     if (sameName)
       return `A database named '${sameName.DatabaseName}' already exists on this server for customer ${sameName.CrystalPmId}. Choose a name unique to this customer.`;
+    // A move reserves its target name before the target is registered, so an
+    // unfinished one copying into this name is refused too.
+    const copyingInto = demoStore.customerMoves.some(
+      (m) =>
+        m.TargetDatabaseServerId === req.DatabaseServerId &&
+        (m.TargetDatabaseName ?? "") === name &&
+        ACTIVE_MOVE_STATUSES.has(m.Status ?? ""),
+    );
+    if (copyingInto)
+      return `A customer move in progress is copying into a database named '${name}' on this server. Choose another name.`;
     return null;
   }
 
@@ -312,6 +325,14 @@ function mintRefusal(req: CreateMigrationSessionRequest): string | null {
   // progress shows as `moving`.
   if (database.Status !== "active")
     return `The selected database is ${database.Status}, so nothing may be migrated into it.`;
+  // A planned move leaves the database active, so its status alone does not
+  // show the move; the service checks the moves themselves.
+  if (
+    demoStore.customerMoves.some(
+      (m) => m.DatabaseId === database.Id && ACTIVE_MOVE_STATUSES.has(m.Status ?? ""),
+    )
+  )
+    return "The selected database has a customer move in progress. Wait for it to finish or cancel it.";
   // One live key per database, as the service allows: none while another is
   // redeemed, streaming, or pending and not yet expired.
   const live = demoStore.migrationSessions.filter(

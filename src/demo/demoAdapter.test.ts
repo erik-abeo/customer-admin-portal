@@ -731,3 +731,43 @@ describe("demo refuses a repoint while a migration streams into the database", (
     }
   });
 });
+
+describe("demo mint refuses around a move", () => {
+  it("refuses a key against a database with a planned move, and a name a move is copying into", async () => {
+    const planned = {
+      ...demoStore.customerMoves[0],
+      Id: 991,
+      DatabaseId: 102,
+      TargetDatabaseServerId: 2,
+      TargetDatabaseName: "tenant_new_home",
+      Status: "planned",
+    } as CustomerMove;
+    demoStore.customerMoves = [planned, ...demoStore.customerMoves];
+    try {
+      const existing = await call("post", "/create-migration-session", {
+        DatabaseServerId: 1,
+        DatabaseId: 102,
+        DatabaseName: null,
+        CrystalPmId: 33333,
+        CreatedByAdmin: "demo",
+        ExpiresInMinutes: 60,
+      });
+      expect(messageOf(existing.data)).toBe(
+        "The selected database has a customer move in progress. Wait for it to finish or cancel it.",
+      );
+      const provision = await call("post", "/create-migration-session", {
+        DatabaseServerId: 2,
+        DatabaseId: null,
+        DatabaseName: "tenant_new_home",
+        CrystalPmId: 424242,
+        CreatedByAdmin: "demo",
+        ExpiresInMinutes: 60,
+      });
+      expect(messageOf(provision.data)).toBe(
+        "A customer move in progress is copying into a database named 'tenant_new_home' on this server. Choose another name.",
+      );
+    } finally {
+      demoStore.customerMoves = demoStore.customerMoves.filter((m) => m.Id !== 991);
+    }
+  });
+});

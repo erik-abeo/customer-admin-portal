@@ -9,7 +9,6 @@
     "operatingSystemFamily": "LINUX"
   },
   "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/customer-admin-portal-task",
   "containerDefinitions": [
     {
       "name": "web",

@@ -78,9 +78,15 @@ export const whyDatabaseNotMovable = (
   database: DatabaseInfoItem,
   moves: ReadonlyArray<CustomerMove>,
   sessions: ReadonlyArray<MigrationSessionItem> = [],
+  staticGrants?: ReadonlyMap<number, number>,
 ): string | null => {
   const unavailable = whyDatabaseUnavailable(database.Status);
   if (unavailable) return unavailable;
+  // Refused by the service too: the grants live on the source server, and a
+  // move does not carry them, so they would still point at the old copy.
+  const grants = staticGrants?.get(database.Id) ?? 0;
+  if (grants > 0)
+    return `${grants} static user privilege(s) are held on it, and moves do not carry static users yet`;
   const unsettled = moves.find(
     (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
   );

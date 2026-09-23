@@ -23,6 +23,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { shouldSweepAfterFailedStart } from "./cleanupPolicy";
+
 export const MYSQL_CONTAINER = "cpm-api-mysql84-test";
 export const MARIADB_CONTAINER = "cpm-api-mariadb106-test";
 
@@ -449,9 +451,14 @@ export async function startStack(port: number): Promise<() => Promise<void>> {
     if (existsSync(directory)) rmSync(directory, { recursive: true, force: true });
   };
   let api: ChildProcess | undefined;
+  // Set once both containers have proved to be the test servers. Until then a
+  // failed start must not sweep: that would drop schemas and logins from
+  // whatever answered.
+  let serversVerified = false;
   try {
     await assertTestServer(MYSQL_CONTAINER, MYSQL_PORT);
     await assertTestServer(MARIADB_CONTAINER, MARIADB_PORT);
+    serversVerified = true;
     sweep();
     buildAuthDatabase();
 
@@ -462,10 +469,10 @@ export async function startStack(port: number): Promise<() => Promise<void>> {
   } catch (error) {
     api?.kill();
     removeCopy();
-    // A failed start can leave schemas and users behind (buildAuthDatabase
-    // got partway, or the API ran briefly), so they are swept like a normal
-    // teardown, unless the run asked to keep them for inspection.
-    if (process.env.CPM_LIVE_KEEP !== "1") {
+    // A failed start after the servers were verified can leave schemas and
+    // users behind (buildAuthDatabase got partway, or the API ran briefly), so
+    // they are swept like a normal teardown, unless the run asked to keep them.
+    if (shouldSweepAfterFailedStart(serversVerified, process.env.CPM_LIVE_KEEP)) {
       try {
         sweep();
       } catch {

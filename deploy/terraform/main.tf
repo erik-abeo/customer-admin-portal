@@ -12,8 +12,10 @@
 #   terraform plan -out plan.bin
 #   terraform apply plan.bin
 #
-# CI workflow (.github/workflows/ci.yml) builds and pushes the image to ECR;
-# this Terraform manages the cluster-side resources.
+# Nothing in CI pushes or deploys: .github/workflows/ci.yml builds the image
+# (push: false) with no ECR login. Build, tag and push the image yourself, then
+# roll the service by hand (see deploy/README.md). This Terraform manages the
+# cluster-side resources.
 # -------------------------------------------------------------------------
 
 terraform {
@@ -65,9 +67,10 @@ variable "host_header" {
   default = "admin.example.internal"
 }
 
+# No default: the ECR repository's tags are IMMUTABLE, so a fixed tag such as
+# "latest" can be pushed only once. Set a version or commit SHA per release.
 variable "image_tag" {
-  type    = string
-  default = "latest"
+  type = string
 }
 
 # The SPA's settings, including the Sentry DSN and the audit sink URL, are
@@ -266,7 +269,10 @@ resource "aws_ecs_service" "this" {
   enable_execute_command             = false
 
   lifecycle {
-    ignore_changes = [task_definition] # let CI roll new image tags
+    # A revision rolled out by hand (aws ecs update-service) is not reverted
+    # by the next terraform apply. It also means apply never rolls the
+    # service to a revision it registers; that step is manual.
+    ignore_changes = [task_definition]
   }
 
   tags = local.tags

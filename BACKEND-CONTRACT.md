@@ -84,20 +84,30 @@ error" on an unexpected failure. The SPA does not read the success body;
 failures surface through the HTTP status, and the error interceptor shows a
 string body as the message.
 
-**Known issue, pending confirmation of what is deployed: a successful user
-update or delete is reported as a failure.** `SupertokensService` calls
-`update-user` and `delete-user` on the SuperTokens backend at
-`Supertokens:ApiUrl`, and `UserManagementController` treats any answer whose
-`Status` is not `OK` as a refusal. The backend in this repository
+**Known issue, pending confirmation of what is deployed: user writes do not
+work against the repository's SuperTokens backend.** `SupertokensService`
+calls `create-user`, `update-user` and `delete-user` on the backend at
+`Supertokens:ApiUrl`, with no session and no `Authorization` header. The
+backend in this repository
 (`remote-database-system/GatewayServer/SupertokensFrontendAndBackend/backend/userRoutes.ts`)
-answers both with 200 `{"message": ...}` and no `status` field. Against it, the
-service returns 400 for an update or delete that SuperTokens has already
-applied, and skips its own step: an update's local record (static host,
-mappings, concurrent sessions) is not written, and a delete's local record is
-not removed. This predates this branch. The portal's behaviour is unchanged: it
-shows the 400 as a failure, which is then misleading, since the email, password
-or SuperTokens user has already changed or gone. Creating a user is not
-affected.
+puts all three behind `verifySession()`, so against it:
+
+- **Each call answers 401.** `HandleResponse` throws on the non-success status,
+  and the controller answers **500** "Internal server error". Nothing changes,
+  in SuperTokens or locally. This is the case for creating a user too.
+- **If the deployed backend accepts the call** (no `verifySession()`, or a
+  session the service does send), a second problem follows for update and
+  delete. The backend answers them with 200 `{"message": ...}` and no `status`
+  field, and `UserManagementController` treats any answer whose `Status` is not
+  `OK` as a refusal. It then returns 400 after SuperTokens has already applied
+  the change, and skips its own step: an update's local record (static host,
+  mappings, concurrent sessions) is not written, and a delete's local record is
+  not removed. Create is not affected by this part: `create-user` returns the
+  SuperTokens sign-up response, which does carry `status`.
+
+Both predate this branch. The portal's behaviour is unchanged: it shows the 500
+or the 400 as a failure. After a 400 that is misleading, since the email,
+password or SuperTokens user has already changed or gone.
 
 ### 1.1 Database server probe
 

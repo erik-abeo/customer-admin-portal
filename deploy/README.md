@@ -16,12 +16,23 @@ introducing a parallel one.
 
 ## ECS task definition (without Terraform)
 
-`ecs-task-definition.json` is a plain RegisterTaskDefinition input. Replace the
-`<ANGLE_BRACKETS>` values for your account and region, then:
+`ecs-task-definition.json` is a plain RegisterTaskDefinition input. Nothing in
+CI pushes or deploys (the Docker job builds with `push: false` and has no ECR
+login), so every step is yours:
+
+1. Create the ECR repository once, with immutable tags, as the Terraform does:
+   `aws ecr create-repository --repository-name customer-admin-portal --image-tag-mutability IMMUTABLE`.
+2. Build the image and push it under a **new** tag, a version or commit SHA; an
+   immutable tag such as `latest` can be pushed only once.
+3. Replace the `<ANGLE_BRACKETS>` values for your account, region and that tag,
+   then register the task definition:
 
 ```bash
 aws ecs register-task-definition --cli-input-json file://deploy/ecs-task-definition.json
 ```
+
+It has no task role: nginx serving static files makes no AWS calls. The
+execution role only pulls the image and writes logs.
 
 Create or update a service that uses it behind an ALB target group on port 8080. The container is rootless (uid 101) and listens on 8080, so there is no
 port mapping to 80 or 443.
@@ -198,8 +209,9 @@ on the old image. Instead:
    `aws ecs update-service --cluster <cluster> --service customer-admin-portal --task-definition customer-admin-portal:<revision>`.
    `terraform apply` does **not** do this step: the service's
    `lifecycle { ignore_changes = [task_definition] }` is there on purpose, so
-   Terraform never rolls back a revision CI has deployed, and it also means a
-   new revision from Terraform sits unused until the service is updated.
+   that a revision rolled out by hand is not reverted by the next apply, and it
+   also means a new revision from Terraform sits unused until the service is
+   updated. Nothing in CI pushes or deploys, so this is always a manual step.
 
 The admin API key (entered at login) is a single `api-key` value in the
 service's configuration; there is no backend issuance. To rotate it, change that
