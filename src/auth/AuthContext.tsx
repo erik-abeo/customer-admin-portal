@@ -14,6 +14,7 @@ import {
   setAuthStrategy,
 } from "@/api/httpClient";
 import { AuthContext, type AuthState } from "@/auth/authContextValue";
+import { clearAuditEntries } from "@/lib/auditLog";
 
 const STORAGE_KEY = "cap.auth.v1";
 
@@ -117,11 +118,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
   // decrypted administrator passwords, and a minted migration key sits in its
   // mutation's result, so none of it may outlive the session that fetched it,
   // idle sign-out and a 401 included, since both come through here.
+  // Every sign-out, the idle one included (it calls this), also empties the
+  // audit buffer, so the next admin's recent activity starts empty.
   const signOut = useCallback(() => {
     writeStored(null);
     applyToHttpClient(null);
     setStored(null);
     queryClient.clear();
+    clearAuditEntries();
   }, [queryClient]);
 
   const value = useMemo<AuthState>(

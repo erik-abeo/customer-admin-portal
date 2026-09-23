@@ -462,6 +462,16 @@ export async function startStack(port: number): Promise<() => Promise<void>> {
   } catch (error) {
     api?.kill();
     removeCopy();
+    // A failed start can leave schemas and users behind (buildAuthDatabase
+    // got partway, or the API ran briefly), so they are swept like a normal
+    // teardown, unless the run asked to keep them for inspection.
+    if (process.env.CPM_LIVE_KEEP !== "1") {
+      try {
+        sweep();
+      } catch {
+        // The original failure is the one to report.
+      }
+    }
     releaseLock();
     throw error;
   }

@@ -31,6 +31,7 @@ import type {
   CreateMigrationSessionResponse,
   MigrationSessionItem,
 } from "@/api/types";
+import { ApiError } from "@/api/httpClient";
 import { RequireRole } from "@/auth/RequireRole";
 import { PageHeader } from "@/components/common/PageHeader";
 import { QueryStatus } from "@/components/common/QueryStatus";
@@ -50,7 +51,8 @@ import {
   canRevoke,
   revokeEndsAStream,
 } from "@/features/migrations/sessionActions";
-import { notifyError, notifySuccess } from "@/lib/notify";
+import { needsWorkByHand, useCustomerMoves } from "@/features/moves/queries";
+import { notifyError, notifySuccess, notifyWarning } from "@/lib/notify";
 
 const STATUS_COLOR: Record<string, string> = {
   pending: "blue",
@@ -83,6 +85,9 @@ const describeDestination = (session: MigrationSessionItem) => {
  */
 export function MigrationsPage() {
   const sessions = useMigrationSessions();
+  // A planned move refuses a key against its database before its status says
+  // moving, so the picker needs the moves themselves.
+  const moves = useCustomerMoves();
   const servers = useDatabaseServers();
   const databases = useDatabases();
 
@@ -143,8 +148,10 @@ export function MigrationsPage() {
           {revokeEndsAStream(session) && (
             <Text size="sm">
               It has already been redeemed, so the installer&apos;s database login is
-              dropped and its connections ended: the stream stops mid-copy. Whatever it
-              had written stays in the target until that is discarded.
+              dropped and its connections ended: the stream stops mid-copy.{" "}
+              {session.DatabaseCreated
+                ? "Whatever it had written stays in the database it created until that is discarded."
+                : "Whatever it had written stays in the existing database: this migration did not create it, so it cannot be discarded, and cleaning it up is a manual job."}
             </Text>
           )}
         </Stack>
@@ -157,7 +164,13 @@ export function MigrationsPage() {
           if (result.Success) notifySuccess(result.Message ?? "Migration key revoked.");
           else notifyError(new Error(result.Message ?? "Could not revoke the key"));
         } catch (error) {
-          notifyError(error);
+          // A 500 whose login drop failed: the key is revoked, but the stream
+          // may still be running and the login needs dropping by hand if it
+          // cannot wait. That stays up until dismissed, rather than closing
+          // by itself as an ordinary failure does.
+          if (error instanceof ApiError && needsWorkByHand(error.message))
+            notifyWarning(error.message, "Key revoked, login still live");
+          else notifyError(error);
         }
       },
     });
@@ -311,6 +324,8 @@ export function MigrationsPage() {
           servers={servers.data ?? []}
           databases={databases.data ?? []}
           serverStatuses={statuses}
+          sessions={sessions.data ?? []}
+          moves={moves.data ?? []}
           submitting={createSession.isPending}
           onCancel={() => setFormOpen(false)}
           onSubmit={(request, description) => setPending({ request, description })}

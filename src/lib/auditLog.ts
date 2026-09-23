@@ -68,6 +68,22 @@ export function installAuditLog(): void {
   addResponseListener(record);
 }
 
+/**
+ * Empties the buffer, for sign-out: what one admin did is not the next one's to
+ * see in the dashboard's recent activity. Subscribers are told, so views reading
+ * it clear too.
+ */
+export function clearAuditEntries(): void {
+  buffer.length = 0;
+  for (const sub of subscribers) {
+    try {
+      sub(snapshot());
+    } catch {
+      // Subscribers must never break the audit pipeline.
+    }
+  }
+}
+
 export function getAuditEntries(): ReadonlyArray<AuditEntry> {
   return snapshot();
 }

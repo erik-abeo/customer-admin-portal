@@ -12,6 +12,26 @@ export const RELOCATION_REFUSED_MESSAGE =
   "can still be rolled back or drop its source. Nothing was saved; reload it and try again.";
 
 /**
+ * The service's other refusals of a server or name change, word for word
+ * (DatabaseInfoController). The service reports one, in this order: not active
+ * or an unsettled move ({@link RELOCATION_REFUSED_MESSAGE}), static users, a
+ * running migration, open CrystalPM sessions. Demo mode answers with them; the
+ * portal itself shows whatever `Message` a refused update carries.
+ */
+export const STATIC_USERS_REFUSED_MESSAGE =
+  "This database's server or name cannot be changed while static users hold privileges on it, because their grants " +
+  "are on its current server. Remove those static user grants first, then try again. Nothing was saved.";
+
+export const RUNNING_MIGRATION_REFUSED_MESSAGE =
+  "This database's server or name cannot be changed while a migration is streaming into it, because the installer " +
+  "is writing to its current server. Wait for the migration to finish, or revoke it, then try again. Nothing was saved.";
+
+export const OPEN_SESSIONS_REFUSED_MESSAGE =
+  "This database's server or name cannot be changed while CrystalPM sessions are open on it, because they are " +
+  "writing to its current server. Wait for them to end: a session ends when CrystalPM closes, or by itself within " +
+  "an hour of starting if the client stopped without closing. Nothing was saved.";
+
+/**
  * Why a database's server and name cannot be changed now, or null when they
  * can. The service writes a change of either only while the database is
  * active (and no move of it can still roll back or drop its source, which the

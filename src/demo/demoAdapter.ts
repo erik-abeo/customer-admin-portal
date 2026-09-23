@@ -62,7 +62,11 @@ import type {
   UpdateUserRequest,
 } from "@/api/types";
 
-import { RELOCATION_REFUSED_MESSAGE } from "@/features/databases/editGuard";
+import {
+  RELOCATION_REFUSED_MESSAGE,
+  RUNNING_MIGRATION_REFUSED_MESSAGE,
+  STATIC_USERS_REFUSED_MESSAGE,
+} from "@/features/databases/editGuard";
 import { hasGrantablePrivilege } from "@/features/staticUsers/privileges";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import { isUnsettledMove } from "@/features/moves/queries";
@@ -199,6 +203,75 @@ function ungrantableServers(
     }),
   }));
   return refused ? servers : null;
+}
+
+/**
+ * A 400 for a port the portal should never send. `ServerPort` is an int on the
+ * service, so a non-integer fails model binding with ASP.NET's own validation
+ * answer; the demo also holds an out-of-range one to 1-65535, as the form does.
+ */
+function invalidPort(value: unknown): HandlerResult | null {
+  const valid =
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 65535;
+  return valid
+    ? null
+    : {
+        status: 400,
+        data: {
+          title: "One or more validation errors occurred.",
+          status: 400,
+          errors: {
+            ServerPort: ["The server port must be a whole number from 1 to 65535."],
+          },
+        },
+      };
+}
+
+/**
+ * A user as the service reads it back. It stores only the database id for a
+ * mapping and takes the server from the database, so a mapping follows its
+ * database when a move repoints it.
+ */
+function withCurrentServers(user: AuthorizedUserInfoItem): AuthorizedUserInfoItem {
+  return {
+    ...user,
+    DatabaseMappings: user.DatabaseMappings.map((m) => ({
+      ...m,
+      DatabaseServerId:
+        demoStore.databases.find((d) => d.Id === m.DatabaseId)?.DatabaseServerId ??
+        m.DatabaseServerId,
+    })),
+  };
+}
+
+/**
+ * The service's 400 for mappings naming a server the database is not on, or a
+ * database that does not exist (UserManagementController.
+ * DescribeMismatchedDatabaseMappings), checked before anything changes.
+ */
+function mismatchedMappings(
+  mappings: { DatabaseServerId: number; DatabaseId: number }[] | null | undefined,
+): HandlerResult | null {
+  const mismatched = (mappings ?? []).filter((m) => {
+    const database = demoStore.databases.find((d) => d.Id === m.DatabaseId);
+    return !database || database.DatabaseServerId !== m.DatabaseServerId;
+  });
+  if (mismatched.length === 0) return null;
+  return {
+    status: 400,
+    data:
+      "These database mappings name a server the database is not on, or a database that does not exist: " +
+      mismatched
+        .map(
+          (m) =>
+            `databaseId=${m.DatabaseId} with databaseServerId=${m.DatabaseServerId}`,
+        )
+        .join("; ") +
+      ". A database's server is recorded on the database itself, so the two have to agree.",
+  };
 }
 
 function mintRefusal(req: CreateMigrationSessionRequest): string | null {
@@ -463,8 +536,8 @@ const ROUTES: Route[] = [
         ErrorMessage: null,
       };
       demoStore.customerMoves = [move, ...demoStore.customerMoves];
-      // What planning does on the service: the customer stops getting new sessions.
-      database.Status = "moving";
+      // Planning records the move and nothing else: the database stays active
+      // until the executor starts draining it, as the service does.
       return ok({
         Success: true,
         MoveId: id,
@@ -941,6 +1014,8 @@ const ROUTES: Route[] = [
     pattern: /^\/create-database-server-info$/,
     handle: ({ body }) => {
       const req = body as CreateDatabaseServerInfoRequest;
+      const badPort = invalidPort(req.ServerPort);
+      if (badPort) return badPort;
       // Blank optional fields are stored as NULL, as the service stores them,
       // and a missing admin login defaults to root.
       const blankToNull = (value: string | null | undefined) =>
@@ -971,9 +1046,11 @@ const ROUTES: Route[] = [
       if (idx === -1) return notFound(`Database server ${req.Id} not found`);
 
       // Field by field, as the service applies an update: a string that is
-      // null, empty or whitespace leaves the stored value alone, and a port only
-      // counts when positive. SecurityGroupId alone can be cleared: null leaves
-      // it, and an empty string stores null.
+      // null, empty or whitespace leaves the stored value alone. The service
+      // skips a port that is not positive; the demo refuses anything outside
+      // 1-65535 instead, as the form does, so a bad port is visible.
+      // SecurityGroupId alone can be cleared: null leaves it, and an empty
+      // string stores null.
       const stored = demoStore.servers[idx];
       const given = (value: string | null | undefined): value is string =>
         value !== null && value !== undefined && value.trim().length > 0;
@@ -984,7 +1061,9 @@ const ROUTES: Route[] = [
         next.LocalServerAddress = req.LocalServerAddress;
       if (given(req.RemoteServerAddress))
         next.RemoteServerAddress = req.RemoteServerAddress;
-      if (req.ServerPort > 0) next.ServerPort = req.ServerPort;
+      const badPort = invalidPort(req.ServerPort);
+      if (badPort) return badPort;
+      next.ServerPort = req.ServerPort;
       if (given(req.RootUserPassword)) next.RootUserPassword = req.RootUserPassword;
       if (given(req.Certificate)) next.Certificate = req.Certificate;
       if (given(req.AdminUserName)) next.AdminUserName = req.AdminUserName.trim();
@@ -1093,8 +1172,24 @@ const ROUTES: Route[] = [
         !demoStore.customerMoves.some(
           (m) => m.DatabaseId === current.Id && isUnsettledMove(m),
         );
+      // In the service's order: not active or an unsettled move, then static
+      // users (their grants are on the current server), then a migration
+      // streaming into it. The service's fourth, open CrystalPM sessions, has
+      // no demo data to come from.
+      const staticGrants = Object.values(demoStore.staticUserPrivileges)
+        .flat()
+        .some((p) => p.DatabaseId === current.Id);
+      const streaming = demoStore.migrationSessions.some(
+        (m) =>
+          m.DatabaseId === current.Id &&
+          (m.Status === "redeemed" || m.Status === "streaming"),
+      );
       if (relocating && !movable)
         return ok({ Success: false, Message: RELOCATION_REFUSED_MESSAGE });
+      if (relocating && staticGrants)
+        return ok({ Success: false, Message: STATIC_USERS_REFUSED_MESSAGE });
+      if (relocating && streaming)
+        return ok({ Success: false, Message: RUNNING_MIGRATION_REFUSED_MESSAGE });
       demoStore.databases[idx] = {
         ...current,
         DatabaseServerId: serverId,
@@ -1146,7 +1241,7 @@ const ROUTES: Route[] = [
       ok({
         Success: true,
         Message: null,
-        AuthorizedUserInfoList: demoStore.authorizedUsers,
+        AuthorizedUserInfoList: demoStore.authorizedUsers.map(withCurrentServers),
       }),
   },
   {
@@ -1158,11 +1253,13 @@ const ROUTES: Route[] = [
       const databaseId = Number(params.databaseId);
       // As the service answers it: each user carries only the mapping that
       // was asked about, not every database they can reach.
+      // Matched on the database's current server, as the service joins it.
+      const current = demoStore.databases.find((d) => d.Id === databaseId);
       const filtered = demoStore.authorizedUsers
-        .filter((u) =>
-          u.DatabaseMappings.some(
-            (m) => m.DatabaseServerId === serverId && m.DatabaseId === databaseId,
-          ),
+        .filter(
+          (u) =>
+            current?.DatabaseServerId === serverId &&
+            u.DatabaseMappings.some((m) => m.DatabaseId === databaseId),
         )
         .map((u) => ({
           ...u,
@@ -1185,7 +1282,7 @@ const ROUTES: Route[] = [
       return ok({
         Success: !!found,
         Message: found ? null : `User ${id} not found`,
-        UserInfo: found ?? null,
+        UserInfo: found ? withCurrentServers(found) : null,
       });
     },
   },
@@ -1194,6 +1291,8 @@ const ROUTES: Route[] = [
     pattern: /^\/create-user$/,
     handle: ({ body }) => {
       const req = body as CreateUserRequest;
+      const mismatch = mismatchedMappings(req.DatabaseMappings);
+      if (mismatch) return mismatch;
       const next: AuthorizedUserInfoItem = {
         Id: demoStore.authorizedUserIds.next(),
         Email: req.Email,
@@ -1219,6 +1318,8 @@ const ROUTES: Route[] = [
       const userId = Number(req.UserId);
       const idx = demoStore.authorizedUsers.findIndex((u) => u.Id === userId);
       if (idx === -1) return notFound(`User ${req.UserId} not found`);
+      const mismatch = mismatchedMappings(req.DatabaseMappings);
+      if (mismatch) return mismatch;
       const current = demoStore.authorizedUsers[idx];
       demoStore.authorizedUsers[idx] = {
         ...current,

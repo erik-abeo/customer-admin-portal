@@ -124,6 +124,16 @@ export function PrivilegesEditor({
         const server = servers.find((s) => s.Id === entry.ServerId);
         const allDbs = dbsByServer.get(entry.ServerId) ?? [];
         const selectedDbIds = new Set(entry.Databases.map((d) => d.DatabaseId));
+        // Held here, but the database is now on another server (a move
+        // repointed it) or no longer registered. It has no checkbox under this
+        // server, so it gets its own row with a way to remove it; the service
+        // refuses every save while it stays.
+        const offServer = entry.Databases.filter(
+          (d) => !allDbs.some((x) => x.Id === d.DatabaseId),
+        );
+        const onServer = entry.Databases.filter((d) =>
+          allDbs.some((x) => x.Id === d.DatabaseId),
+        );
 
         return (
           <Paper key={entry.ServerId} withBorder p="sm" radius="md">
@@ -142,6 +152,42 @@ export function PrivilegesEditor({
                 </ActionIcon>
               )}
             </Group>
+
+            {offServer.length > 0 && (
+              <Stack gap={4} mb="xs">
+                {offServer.map((d) => {
+                  const database = databases.find((x) => x.Id === d.DatabaseId);
+                  const elsewhere = database
+                    ? (servers.find((s) => s.Id === database.DatabaseServerId)?.Name ??
+                      `server ${database.DatabaseServerId}`)
+                    : null;
+                  const name = database?.DatabaseName ?? `database ${d.DatabaseId}`;
+                  return (
+                    <Group key={d.DatabaseId} gap="xs" wrap="nowrap">
+                      <Text size="sm" c="red">
+                        <Text span ff="monospace">
+                          {name}
+                        </Text>
+                        {elsewhere
+                          ? ` is held here but is now on ${elsewhere}.`
+                          : " is held here but no longer exists."}
+                      </Text>
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        color="red"
+                        onClick={() =>
+                          toggleDatabase(entry.ServerId, d.DatabaseId, false)
+                        }
+                        aria-label={`Remove ${name} from ${server?.Name ?? `server ${entry.ServerId}`}`}
+                      >
+                        Remove
+                      </Button>
+                    </Group>
+                  );
+                })}
+              </Stack>
+            )}
 
             {allDbs.length === 0 ? (
               <Text size="xs" c="dimmed">
@@ -180,7 +226,7 @@ export function PrivilegesEditor({
                   })}
                 </Group>
 
-                {entry.Databases.length > 0 && (
+                {onServer.length > 0 && (
                   <Table.ScrollContainer minWidth={600}>
                     <Table withTableBorder verticalSpacing={4} fz="xs">
                       <Table.Thead>
@@ -194,7 +240,7 @@ export function PrivilegesEditor({
                         </Table.Tr>
                       </Table.Thead>
                       <Table.Tbody>
-                        {entry.Databases.map((d) => {
+                        {onServer.map((d) => {
                           const db = allDbs.find((x) => x.Id === d.DatabaseId);
                           return (
                             <Table.Tr key={d.DatabaseId}>

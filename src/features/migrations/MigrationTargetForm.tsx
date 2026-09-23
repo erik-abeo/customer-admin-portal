@@ -20,8 +20,10 @@ import {
 import { getAdminName } from "@/api/httpClient";
 import type {
   CreateMigrationSessionRequest,
+  CustomerMove,
   DatabaseInfoItem,
   DatabaseServerInfoItem,
+  MigrationSessionItem,
 } from "@/api/types";
 import { FormSection } from "@/components/common/FormSection";
 import {
@@ -43,6 +45,9 @@ interface MigrationTargetFormProps {
   databases: DatabaseInfoItem[];
   /** Recorded status per server id. A server missing from it is not refused. */
   serverStatuses?: Map<number, string | null>;
+  /** Existing sessions and moves, so a database the service would refuse is disabled. */
+  sessions?: MigrationSessionItem[];
+  moves?: CustomerMove[];
   submitting?: boolean;
   onCancel: () => void;
   /** Receives the request plus the plain-language destination for the confirm step. */
@@ -63,6 +68,8 @@ export function MigrationTargetForm({
   servers,
   databases,
   serverStatuses,
+  sessions,
+  moves,
   submitting,
   onCancel,
   onSubmit,
@@ -98,7 +105,7 @@ export function MigrationTargetForm({
         // after a database was picked.
         const chosen = databases.find((d) => String(d.Id) === value);
         const reason = chosen
-          ? whyDatabaseNotSelectable(chosen, values.CrystalPmId)
+          ? whyDatabaseNotSelectable(chosen, values.CrystalPmId, { sessions, moves })
           : null;
         return reason ? `That database cannot be used: ${reason}.` : null;
       },
@@ -225,6 +232,10 @@ export function MigrationTargetForm({
                 const unavailable = whyDatabaseNotSelectable(
                   d,
                   form.values.CrystalPmId,
+                  {
+                    sessions,
+                    moves,
+                  },
                 );
                 return {
                   value: String(d.Id),

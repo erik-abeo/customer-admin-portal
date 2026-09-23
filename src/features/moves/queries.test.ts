@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CustomerMove, DatabaseInfoItem } from "@/api/types";
+import type { CustomerMove, DatabaseInfoItem, MigrationSessionItem } from "@/api/types";
 
 import {
   canCancelMove,
@@ -152,5 +152,26 @@ describe("needsWorkByHand", () => {
       needsWorkByHand("Move cancelled. The customer is back online on the source."),
     ).toBe(false);
     expect(needsWorkByHand(null)).toBe(false);
+    // Revoke's 500 when the installer's login could not be dropped.
+    expect(
+      needsWorkByHand(
+        "The key is revoked, but the installer's database login 'cpmmig_1' could not be dropped yet and may still be streaming. It is retried automatically every few minutes; drop it by hand on the server if it cannot wait.",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("whyDatabaseNotMovable with migrations", () => {
+  it("refuses a database a migration is streaming into, as the service does", () => {
+    const streaming = [
+      { DatabaseId: 100, Status: "streaming" },
+    ] as MigrationSessionItem[];
+    expect(whyDatabaseNotMovable(database, [], streaming)).toBe(
+      "a migration is streaming into it",
+    );
+    const finished = [
+      { DatabaseId: 100, Status: "completed" },
+    ] as MigrationSessionItem[];
+    expect(whyDatabaseNotMovable(database, [], finished)).toBeNull();
   });
 });

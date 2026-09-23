@@ -87,6 +87,11 @@ export function useUpdateDatabase() {
       qc.invalidateQueries({ queryKey: KEYS.detail(variables.Id) });
       // Moving a registration to another server changes both servers' counts.
       qc.invalidateQueries({ queryKey: ["server-capacity"] });
+      // Both user lists carry where their databases are: an authorized user's
+      // mappings name the server, and a static user's grants are listed per
+      // server, and the per-database user reads are keyed by server.
+      qc.invalidateQueries({ queryKey: ["authorized-users"] });
+      qc.invalidateQueries({ queryKey: ["static-users"] });
     },
   });
 }

@@ -1,7 +1,9 @@
 import type {
   CreateMigrationSessionRequest,
+  CustomerMove,
   DatabaseInfoItem,
   DatabaseServerInfoItem,
+  MigrationSessionItem,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
 import { whyServerNotTakingCustomers } from "@/features/databaseServers/status";
@@ -87,9 +89,31 @@ export const visibleDatabases = (
 export const whyDatabaseNotSelectable = (
   database: DatabaseInfoItem,
   crystalPmId: number | string,
+  context: {
+    sessions?: ReadonlyArray<MigrationSessionItem>;
+    moves?: ReadonlyArray<CustomerMove>;
+    now?: number;
+  } = {},
 ): string | null => {
   const unavailable = whyDatabaseUnavailable(database.Status);
   if (unavailable) return unavailable;
+  // Both refused by the service too. A move is planned before the database
+  // is marked moving, so status alone misses a planned one.
+  const now = context.now ?? Date.now();
+  const liveKey = (context.sessions ?? []).some(
+    (s) =>
+      s.DatabaseId === database.Id &&
+      (s.Status === "redeemed" ||
+        s.Status === "streaming" ||
+        (s.Status === "pending" && Date.parse(s.ExpiresDateTimeUtc) > now)),
+  );
+  if (liveKey) return "it already has a live migration key";
+  const activeMove = (context.moves ?? []).some(
+    (m) =>
+      m.DatabaseId === database.Id &&
+      ["planned", "draining", "copying", "verifying"].includes(m.Status ?? ""),
+  );
+  if (activeMove) return "a customer move of it is in progress";
   const customer = Number(crystalPmId);
   if (
     crystalPmId !== "" &&

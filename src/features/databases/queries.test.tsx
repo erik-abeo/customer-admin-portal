@@ -11,14 +11,14 @@
  *  4. disabled state when `id` is undefined
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { databasesApi } from "@/api/databases";
 import { ApiError } from "@/api/httpClient";
 import type { DatabaseInfoItem, GetDatabaseInfoResponse } from "@/api/types";
-import { databaseKeys, useDatabase } from "./queries";
+import { databaseKeys, useDatabase, useUpdateDatabase } from "./queries";
 
 vi.mock("@/api/databases", () => ({
   databasesApi: {
@@ -147,5 +147,22 @@ describe("useDatabase", () => {
       expect(result.current.fetchStatus).toBe("idle");
     });
     expect(databasesApi.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("useUpdateDatabase", () => {
+  it("refreshes both user lists, which carry where their databases are", async () => {
+    vi.mocked(databasesApi.update).mockResolvedValue({ Success: true, Message: null });
+    const client = new QueryClient();
+    const spy = vi.spyOn(client, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateDatabase(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await act(() => result.current.mutateAsync({ Id: 7 } as never));
+    const keys = spy.mock.calls.map(([filters]) => filters?.queryKey);
+    expect(keys).toContainEqual(["authorized-users"]);
+    expect(keys).toContainEqual(["static-users"]);
   });
 });

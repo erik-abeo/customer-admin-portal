@@ -1,21 +1,4 @@
 {
-  "$comment": [
-    "ECS Fargate task definition for the Customer Admin Portal.",
-    "Replace the values surrounded by <ANGLE_BRACKETS> for your account / region.",
-    "",
-    "Deploy with:",
-    "  aws ecs register-task-definition --cli-input-json file://deploy/ecs-task-definition.json",
-    "",
-    "Then create / update a service that uses this task definition behind an",
-    "ALB target group on port 8080. The container is ROOTLESS (uid 101) and",
-    "listens on 8080, so there is no need for awsvpc port mappings to 80/443.",
-    "",
-    "The SPA has no runtime configuration. Every VITE_* value, the Sentry DSN",
-    "and audit-sink URL included, is baked in at image build with --build-arg",
-    "(see deploy/README.md), so none of them belongs here: the container is",
-    "nginx serving static files, and environment variables never reach the",
-    "bundle."
-  ],
   "family": "customer-admin-portal",
   "requiresCompatibilities": ["FARGATE"],
   "networkMode": "awsvpc",
@@ -62,8 +45,7 @@
         "options": {
           "awslogs-group": "/ecs/customer-admin-portal",
           "awslogs-region": "<REGION>",
-          "awslogs-stream-prefix": "web",
-          "awslogs-create-group": "true"
+          "awslogs-stream-prefix": "web"
         }
       },
       "linuxParameters": {

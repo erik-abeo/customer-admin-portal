@@ -35,6 +35,7 @@ import {
   whyServerNotTakingCustomers,
 } from "@/features/databaseServers/status";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
+import { useMigrationSessions } from "@/features/migrations/queries";
 import {
   canCancelMove,
   needsWorkByHand,
@@ -93,6 +94,8 @@ const formatUtc = (value: string | null | undefined) =>
  */
 export function MovesPage() {
   const moves = useCustomerMoves();
+  // A migration streaming into a database refuses a move of it.
+  const sessions = useMigrationSessions();
   const servers = useDatabaseServers();
   const databases = useDatabases();
 
@@ -442,7 +445,11 @@ export function MovesPage() {
             data={(databases.data ?? []).map((d) => {
               // Disabled with the reason rather than hidden, so a customer who is
               // mid-move or suspended is visibly so. The service refuses these too.
-              const unavailable = whyDatabaseNotMovable(d, moves.data ?? []);
+              const unavailable = whyDatabaseNotMovable(
+                d,
+                moves.data ?? [],
+                sessions.data ?? [],
+              );
               return {
                 value: String(d.Id),
                 label: `${d.DatabaseName} (CPM #${d.CrystalPmId})${

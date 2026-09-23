@@ -55,6 +55,23 @@ export const whyPrivilegesIncomplete = (
     const server = servers.find((s) => s.Id === serverId)?.Name ?? `server ${serverId}`;
     return `${database} on ${server}`;
   };
+  // Held on a server it is no longer on (a move repointed it), or gone: the
+  // service refuses both, in these words, so they are said the same way here.
+  // Skipped while the database list has not loaded.
+  const misplaced =
+    databases.length === 0
+      ? []
+      : grids.flatMap((grid) =>
+          grid.Databases.flatMap((d) => {
+            const database = databases.find((x) => x.Id === d.DatabaseId);
+            if (!database) return [`Database ID ${d.DatabaseId} does not exist.`];
+            return database.DatabaseServerId !== grid.ServerId
+              ? [
+                  `'${database.DatabaseName}' is not on server ${grid.ServerId}. Re-pick it under the server it is on.`,
+                ]
+              : [];
+          }),
+        );
   const unavailable = grids.flatMap((grid) =>
     grid.Databases.flatMap((d) => {
       const reason = whyNotGrantableStatus(
@@ -69,6 +86,7 @@ export const whyPrivilegesIncomplete = (
     ),
   );
   const problems = [
+    misplaced.length > 0 ? `${misplaced.join(" ")} Remove it from this server.` : null,
     unavailable.length > 0
       ? `Untick ${unavailable.join(", ")}: static users can only be granted an active database, and the service refuses the whole change otherwise.`
       : null,

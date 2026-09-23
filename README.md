@@ -9,8 +9,8 @@ the API enables CORS, see below).
 The portal is a Vite + React 18 + TypeScript SPA that talks to the
 `ClientRemoteDatabaseAccessAPI` ASP.NET Web Service running on the gateway
 server. In production the SPA calls `/api`, which the container's nginx
-proxies to the service (at `https://remotedb.crystalpm.net`), so the browser
-only ever talks to one origin.
+proxies to the gateway at `https://remotedb.crystalpm.net`, which forwards
+`/My` to the service, so the browser only ever talks to one origin.
 
 ## Features
 

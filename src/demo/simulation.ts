@@ -87,7 +87,13 @@ function enterPhase(
   move.Status = status;
   move.PhaseDetail = detail;
 
-  if (status === "draining") move.QuiescedDateTimeUtc = at;
+  if (status === "draining") {
+    move.QuiescedDateTimeUtc = at;
+    // Draining is when the service marks the database moving, so the customer
+    // stops getting new sessions; planning left it active.
+    const draining = state.databases.find((d) => d.Id === move.DatabaseId);
+    if (draining?.Status === "active") draining.Status = "moving";
+  }
   if (status === "copying") move.CopyStartedDateTimeUtc = at;
   if (status === "verifying") move.CopyCompletedDateTimeUtc = at;
   if (status !== "flipped") return;

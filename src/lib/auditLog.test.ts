@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ApiError, setAdminName } from "@/api/httpClient";
-import { getAuditEntries, installAuditLog, subscribeAuditEntries } from "./auditLog";
+import {
+  clearAuditEntries,
+  getAuditEntries,
+  installAuditLog,
+  subscribeAuditEntries,
+} from "./auditLog";
 
 installAuditLog();
 
@@ -35,5 +40,16 @@ describe("audit log shim", () => {
     expect(e.status).toBe(401);
     expect(e.details).toEqual({ code: "X" });
     expect(e.name).toBe("ApiError");
+  });
+});
+
+describe("clearAuditEntries", () => {
+  it("empties the buffer and tells subscribers", () => {
+    const seen: number[] = [];
+    const unsubscribe = subscribeAuditEntries((entries) => seen.push(entries.length));
+    clearAuditEntries();
+    expect(getAuditEntries()).toHaveLength(0);
+    expect(seen.at(-1)).toBe(0);
+    unsubscribe();
   });
 });

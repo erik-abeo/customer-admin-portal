@@ -128,9 +128,15 @@ export function identifier(field: string): Validator<string | null | undefined> 
   };
 }
 
+/**
+ * A TCP port, required: 1 to 65535. The API's `ServerPort` is an int, so a
+ * cleared field would post "" and fail model binding with a bare 400, and the
+ * service does not range-check an int it can bind.
+ */
 export function port(field = "Port"): Validator<number | string | null | undefined> {
   return (value) => {
-    if (value === null || value === undefined || value === "") return null;
+    if (value === null || value === undefined || value === "")
+      return `${field} is required`;
     const n = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(n) || !Number.isInteger(n)) {
       return `${field} must be a whole number`;

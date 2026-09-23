@@ -262,7 +262,9 @@ silently creating a user who cannot reach their database.
 `retired`. It is returned by `get-all-database-info` and
 `get-database-info/{id}`, and is set by the service rather than by
 `create-database-info` or `update-database-info`. `moving` is set by the
-service while a customer move holds the database. No endpoint sets `suspended`
+service when a customer move starts draining the database, not when it is
+planned: a planned move leaves the database `active` until the executor picks
+it up. No endpoint sets `suspended`
 or `retired`: both are set by hand in `database_info.status`, `suspended` by an
 operator and `retired` once a database is out of service.
 
@@ -305,15 +307,42 @@ refusal stays the backstop for a status that changed after the list was loaded.
 **Updating a database** (`update-database-info`) skips blank strings, as the
 server update does, so `Description` cannot be cleared through it. A change of
 `DatabaseServerId` or `DatabaseName` is written only when it is no change, or
-when the database is `active` with no move of it that can still roll back or
-drop its source (planned through flipped, or settled with the source drop
-unfinished). The check is part of the same `UPDATE`, so a move cutting over at
-that moment cannot slip past it. A refusal is **200** with `Success: false` and
-nothing saved:
+when nothing is tied to where the database is now. The check is part of the
+same `UPDATE`, so a move cutting over at that moment cannot slip past it. A
+refusal is **200** with `Success: false`, nothing saved, and one `Message`,
+the first that applies in this order:
 
-> This database's server or name cannot be changed while it is not active or
-> while a move of it can still be rolled back or drop its source. Nothing was
-> saved; reload it and try again.
+1. The database is not `active`, or a move of it can still roll back or drop
+   its source (planned through flipped, or settled with the source drop
+   unfinished):
+
+   > This database's server or name cannot be changed while it is not active or
+   > while a move of it can still be rolled back or drop its source. Nothing was
+   > saved; reload it and try again.
+
+2. Static users hold privileges on it, and their grants are on its current
+   server:
+
+   > This database's server or name cannot be changed while static users hold
+   > privileges on it, because their grants are on its current server. Remove
+   > those static user grants first, then try again. Nothing was saved.
+
+3. A migration is streaming into it (a session `redeemed` or `streaming`):
+
+   > This database's server or name cannot be changed while a migration is
+   > streaming into it, because the installer is writing to its current server.
+   > Wait for the migration to finish, or revoke it, then try again. Nothing was
+   > saved.
+
+4. CrystalPM sessions are open on it:
+
+   > This database's server or name cannot be changed while CrystalPM sessions
+   > are open on it, because they are writing to its current server. Wait for
+   > them to end: a session ends when CrystalPM closes, or by itself within an
+   > hour of starting if the client stopped without closing. Nothing was saved.
+
+The portal shows whichever `Message` comes back rather than matching its text.
+Demo mode mirrors the first three; it has no CrystalPM sessions to refuse on.
 
 An edit that changes only the description or customer id is still written in
 any status, including while the database is moving. The portal locks the server
@@ -443,8 +472,11 @@ would make CrystalPM's first new table refuse to join with the copied ones.
 
 **The customer cannot start new sessions from `draining` until the move
 finishes, and is offline outright during `copying` and `verifying`.** Planning
-reserves the target name and marks the database `moving`, and draining waits for
-open sessions to end on their own. Surface that in the list, not only in a
+only records the move. Within moments the executor reserves the target name and
+starts draining, which is when the database is marked `moving`; draining then
+waits for open sessions to end on their own. Until then a planned move's
+database still reads `active`, so the portal's pickers check the moves
+themselves, not only the status. Surface that in the list, not only in a
 detail view. A move in `copying` means a practice cannot open CrystalPM, and
 whoever is looking at the page should not have to click to find that out.
 
@@ -671,8 +703,12 @@ only that it failed.
 
 **Revoking** is how a key minted for the wrong customer is undone. For a key
 already redeemed it also drops the installer's database login and ends its
-connections, so a running stream stops there and then; whatever it had written
-stays in the target until that is discarded. A session that already finished
+connections, so a running stream stops there and then. What it had already
+written depends on the target: in a database the migration created
+(`DatabaseCreated` true), it stays until the target is discarded; in an
+existing database the key was minted against, it stays for good as far as the
+portal goes, since that database is not this migration's to discard, and
+cleaning it up is a manual job. The revoke dialog says which. A session that already finished
 returns `Success: false` with a message rather than being rewritten, and an
 unknown id is a 404.
 

@@ -6,6 +6,7 @@ import type {
   CreateCustomerMoveRequest,
   CustomerMove,
   DatabaseInfoItem,
+  MigrationSessionItem,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
 import { useRefreshOnStatusChange } from "@/lib/statusChanges";
@@ -76,13 +77,23 @@ export const isUnsettledMove = (move: CustomerMove): boolean =>
 export const whyDatabaseNotMovable = (
   database: DatabaseInfoItem,
   moves: ReadonlyArray<CustomerMove>,
+  sessions: ReadonlyArray<MigrationSessionItem> = [],
 ): string | null => {
   const unavailable = whyDatabaseUnavailable(database.Status);
   if (unavailable) return unavailable;
   const unsettled = moves.find(
     (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
   );
-  if (!unsettled) return null;
+  if (!unsettled) {
+    // The service refuses this too: quiescing does not stop the installer's
+    // login, so a move would copy under a stream still writing.
+    const streaming = sessions.some(
+      (s) =>
+        s.DatabaseId === database.Id &&
+        (s.Status === "redeemed" || s.Status === "streaming"),
+    );
+    return streaming ? "a migration is streaming into it" : null;
+  }
   if (unsettled.Status === "flipped")
     return "a cut-over move has not been settled or rolled back";
   if (unsettled.Status === "settled") return "a move's source drop has not finished";

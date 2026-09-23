@@ -36,6 +36,7 @@ import { QueryStatus } from "@/components/common/QueryStatus";
 import { features } from "@/config/env";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { useDatabases } from "@/features/databases/queries";
+import { parsePageSize } from "@/features/eventLog/pageSize";
 import { useEventLog } from "@/features/eventLog/queries";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { notifyError, notifySuccess } from "@/lib/notify";
@@ -314,8 +315,10 @@ function EventLogLive() {
               max={500}
               step={10}
               onChange={(v) => {
-                const n = typeof v === "number" ? v : Number(v);
-                if (!Number.isNaN(n)) {
+                // Clearing the field gives "", which Number() reads as 0; that
+                // and anything outside the allowed range is ignored.
+                const n = parsePageSize(v);
+                if (n !== null) {
                   setPageSize(n);
                   setPage(1);
                 }

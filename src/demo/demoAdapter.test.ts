@@ -486,22 +486,28 @@ describe("demo capacity verdicts", () => {
 
 describe("demo database updates, as the service applies them", () => {
   it("refuses a change of server or name while the database is not active, and nothing is saved", async () => {
-    // tenant_stark (105) is suspended.
-    const res = await call("put", "/update-database-info", {
-      Id: 105,
-      DatabaseServerId: 3,
-      DatabaseName: "tenant_stark_renamed",
-      Description: null,
-      CrystalPmId: 66666,
-    });
-    expect(res.data).toEqual({
-      Success: false,
-      Message:
-        "This database's server or name cannot be changed while it is not active or while a move of it can still be rolled back or drop its source. Nothing was saved; reload it and try again.",
-    });
-    expect(demoStore.databases.find((d) => d.Id === 105)?.DatabaseName).toBe(
-      "tenant_stark",
-    );
+    // tenant_globex (101) has no static grants, so the status is what refuses it.
+    const globex = demoStore.databases.find((d) => d.Id === 101)!;
+    globex.Status = "suspended";
+    try {
+      const res = await call("put", "/update-database-info", {
+        Id: 101,
+        DatabaseServerId: 1,
+        DatabaseName: "tenant_globex_renamed",
+        Description: null,
+        CrystalPmId: 22222,
+      });
+      expect(res.data).toEqual({
+        Success: false,
+        Message:
+          "This database's server or name cannot be changed while it is not active or while a move of it can still be rolled back or drop its source. Nothing was saved; reload it and try again.",
+      });
+      expect(demoStore.databases.find((d) => d.Id === 101)?.DatabaseName).toBe(
+        "tenant_globex",
+      );
+    } finally {
+      demoStore.databases.find((d) => d.Id === 101)!.Status = "active";
+    }
   });
 
   it("still saves a description-only edit of a database that is not active", async () => {
@@ -617,5 +623,111 @@ describe("demo static user refusals read as refusals", () => {
     expect(refusedOutright(data)).toHaveLength(1);
     // Refused outright, so not even the rotation happened.
     expect(data.NewPassword).toBeNull();
+  });
+});
+
+describe("demo database rename with static grants", () => {
+  it("refuses a server or name change while static users hold privileges on it", async () => {
+    // tenant_acme (100) is granted to static user 1.
+    const res = await call("put", "/update-database-info", {
+      Id: 100,
+      DatabaseServerId: 1,
+      DatabaseName: "tenant_acme_renamed",
+      Description: null,
+      CrystalPmId: 11111,
+    });
+    expect(res.data).toEqual({
+      Success: false,
+      Message:
+        "This database's server or name cannot be changed while static users hold privileges on it, because their grants are on its current server. Remove those static user grants first, then try again. Nothing was saved.",
+    });
+    expect(demoStore.databases.find((d) => d.Id === 100)?.DatabaseName).toBe(
+      "tenant_acme",
+    );
+  });
+});
+
+describe("demo mappings follow their database", () => {
+  it("reads a mapping's server from the database, and refuses a mismatched pair", async () => {
+    const acme = demoStore.databases.find((d) => d.Id === 100)!;
+    const home = acme.DatabaseServerId;
+    acme.DatabaseServerId = 2;
+    try {
+      const res = await call("get", "/get-users");
+      const users = (
+        res.data as {
+          AuthorizedUserInfoList: {
+            DatabaseMappings: { DatabaseServerId: number; DatabaseId: number }[];
+          }[];
+        }
+      ).AuthorizedUserInfoList;
+      const mapped = users
+        .flatMap((u) => u.DatabaseMappings)
+        .filter((m) => m.DatabaseId === 100);
+      expect(mapped.length).toBeGreaterThan(0);
+      for (const m of mapped) expect(m.DatabaseServerId).toBe(2);
+
+      const refused = await call("post", "/create-user", {
+        Email: "x@example.com",
+        Password: "pw",
+        UseStaticHost: false,
+        StaticHost: null,
+        MaxLoginInstances: 1,
+        DatabaseMappings: [{ DatabaseServerId: home, DatabaseId: 100 }],
+      });
+      expect(refused.status).toBe(400);
+      expect(refused.data).toBe(
+        `These database mappings name a server the database is not on, or a database that does not exist: databaseId=100 with databaseServerId=${home}. A database's server is recorded on the database itself, so the two have to agree.`,
+      );
+    } finally {
+      acme.DatabaseServerId = home;
+    }
+  });
+});
+
+describe("demo move planning", () => {
+  it("leaves the database active until the move starts draining", async () => {
+    const before = demoStore.customerMoves.length;
+    const res = await call(
+      "post",
+      "/create-customer-move",
+      move({ DatabaseId: 101, TargetDatabaseServerId: 3 }),
+    );
+    if ((res.data as { Success: boolean }).Success) {
+      expect(demoStore.customerMoves.length).toBe(before + 1);
+      expect(demoStore.databases.find((d) => d.Id === 101)?.Status).toBe("active");
+    } else {
+      // An earlier test already moved it; planning must still not mark it moving.
+      expect(demoStore.databases.find((d) => d.Id === 101)?.Status).not.toBe("moving");
+    }
+  });
+});
+
+describe("demo refuses a repoint while a migration streams into the database", () => {
+  it("answers the service's running-migration refusal", async () => {
+    demoStore.databases.push({
+      Id: 201,
+      DatabaseServerId: 2,
+      DatabaseName: "easyopti_0887",
+      Description: null,
+      CrystalPmId: 887,
+      Status: "active",
+    });
+    try {
+      const res = await call("put", "/update-database-info", {
+        Id: 201,
+        DatabaseServerId: 2,
+        DatabaseName: "easyopti_0887_renamed",
+        Description: null,
+        CrystalPmId: 887,
+      });
+      expect(res.data).toEqual({
+        Success: false,
+        Message:
+          "This database's server or name cannot be changed while a migration is streaming into it, because the installer is writing to its current server. Wait for the migration to finish, or revoke it, then try again. Nothing was saved.",
+      });
+    } finally {
+      demoStore.databases = demoStore.databases.filter((d) => d.Id !== 201);
+    }
   });
 });

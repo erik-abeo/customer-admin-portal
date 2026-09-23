@@ -16,8 +16,8 @@ import {
 
 const servers = [{ Id: 1, Name: "east-1" }] as DatabaseServerInfoItem[];
 const databases = [
-  { Id: 100, DatabaseName: "tenant_acme" },
-  { Id: 101, DatabaseName: "tenant_globex" },
+  { Id: 100, DatabaseServerId: 1, DatabaseName: "tenant_acme" },
+  { Id: 101, DatabaseServerId: 1, DatabaseName: "tenant_globex" },
 ] as DatabaseInfoItem[];
 
 describe("static user privileges", () => {
@@ -77,7 +77,7 @@ describe("static user privileges", () => {
 
   it("flags a ticked database that is no longer active, and says to untick it", () => {
     const moving = [
-      { Id: 100, DatabaseName: "tenant_acme", Status: "moving" },
+      { Id: 100, DatabaseServerId: 1, DatabaseName: "tenant_acme", Status: "moving" },
     ] as DatabaseInfoItem[];
     expect(
       whyPrivilegesIncomplete(
@@ -104,5 +104,30 @@ describe("static user privileges", () => {
     expect(whyNotGrantableStatus(undefined)).toBeNull();
     expect(whyNotGrantableStatus("active")).toBeNull();
     expect(whyNotGrantableStatus("suspended")).toBe("suspended");
+  });
+
+  it("flags a held database that a move put on another server, in the service's words", () => {
+    const moved = [
+      { Id: 100, DatabaseServerId: 2, DatabaseName: "tenant_acme", Status: "active" },
+    ] as DatabaseInfoItem[];
+    expect(
+      whyPrivilegesIncomplete(
+        [
+          {
+            ServerId: 1,
+            Databases: [
+              {
+                DatabaseId: 100,
+                Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+              },
+            ],
+          },
+        ],
+        servers,
+        moved,
+      ),
+    ).toBe(
+      "'tenant_acme' is not on server 1. Re-pick it under the server it is on. Remove it from this server.",
+    );
   });
 });

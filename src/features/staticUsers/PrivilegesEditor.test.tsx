@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   type DatabaseInfoItem,
@@ -49,5 +49,44 @@ describe("PrivilegesEditor", () => {
     // Held but gone moving: still enabled, so it can be unticked.
     expect(screen.getByRole("checkbox", { name: /^tenant_initech/ })).toBeEnabled();
     expect(screen.queryByRole("checkbox", { name: /^GRANT on/ })).toBeNull();
+  });
+
+  it("shows a held database now on another server by name, and removes it", () => {
+    const onChange = vi.fn();
+    render(
+      <MantineProvider theme={theme}>
+        <PrivilegesEditor
+          servers={[...servers, { Id: 2, Name: "east-2" } as DatabaseServerInfoItem]}
+          databases={[
+            ...databases,
+            {
+              Id: 200,
+              DatabaseServerId: 2,
+              DatabaseName: "tenant_moved",
+              Status: "active",
+            } as DatabaseInfoItem,
+          ]}
+          value={[
+            {
+              ServerId: 1,
+              Databases: [
+                {
+                  DatabaseId: 200,
+                  Privileges: { ...emptyPrivileges(), SelectPrivilege: true },
+                },
+              ],
+            },
+          ]}
+          onChange={onChange}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByText(/is held here but is now on east-2/)).toBeInTheDocument();
+    expect(screen.queryByText("#200")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove tenant_moved from east-1" }),
+    );
+    expect(onChange).toHaveBeenCalledWith([{ ServerId: 1, Databases: [] }]);
   });
 });

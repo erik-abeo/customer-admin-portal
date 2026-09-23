@@ -196,3 +196,16 @@ describe("DatabaseServerForm", () => {
     );
   });
 });
+
+describe("DatabaseServerForm port", () => {
+  it("requires the port, rather than posting an empty one", async () => {
+    const { onSubmit } = renderForm(stored);
+    const portField = screen.getByLabelText(/^Server port/);
+    fireEvent.change(portField, { target: { value: "" } });
+    // Mantine's NumberInput commits a cleared value on blur.
+    fireEvent.blur(portField);
+    fireEvent.click(submitButton("Save changes"));
+    expect(await screen.findByText("Server port is required")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

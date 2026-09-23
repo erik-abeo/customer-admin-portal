@@ -100,13 +100,13 @@ describe("validators", () => {
       expect(v(70_000)).not.toBeNull();
       expect(v(-1)).not.toBeNull();
     });
+    it("requires a value, since a cleared field would post an empty string", () => {
+      expect(port("Server port")("")).toBe("Server port is required");
+      expect(v(null)).not.toBeNull();
+      expect(v(undefined)).not.toBeNull();
+    });
     it("rejects non-integers", () => {
       expect(v(80.5)).not.toBeNull();
-    });
-    it("ignores empty", () => {
-      expect(v(null)).toBeNull();
-      expect(v(undefined)).toBeNull();
-      expect(v("")).toBeNull();
     });
   });
 

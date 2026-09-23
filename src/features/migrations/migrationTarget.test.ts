@@ -13,7 +13,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { DatabaseInfoItem, DatabaseServerInfoItem } from "@/api/types";
+import type {
+  CustomerMove,
+  DatabaseInfoItem,
+  DatabaseServerInfoItem,
+  MigrationSessionItem,
+} from "@/api/types";
 
 import {
   describeTarget,
@@ -226,5 +231,30 @@ describe("whyServerNotSelectable", () => {
 
   it("allows any server for a key against an existing database, as the service does", () => {
     expect(whyServerNotSelectable("existing", "retiring")).toBeNull();
+  });
+});
+
+describe("whyDatabaseNotSelectable with sessions and moves", () => {
+  const mine = database(10, 1, "easyopti_1042", 1042);
+  const now = Date.parse("2026-09-23T12:00:00Z");
+
+  it("refuses a database that already has a live key", () => {
+    const pending = [
+      { DatabaseId: 10, Status: "pending", ExpiresDateTimeUtc: "2026-09-23T13:00:00Z" },
+    ] as MigrationSessionItem[];
+    expect(whyDatabaseNotSelectable(mine, 1042, { sessions: pending, now })).toBe(
+      "it already has a live migration key",
+    );
+    const expired = [
+      { DatabaseId: 10, Status: "pending", ExpiresDateTimeUtc: "2026-09-23T11:00:00Z" },
+    ] as MigrationSessionItem[];
+    expect(whyDatabaseNotSelectable(mine, 1042, { sessions: expired, now })).toBeNull();
+  });
+
+  it("refuses a database with a planned move, which is still active", () => {
+    const planned = [{ DatabaseId: 10, Status: "planned" }] as CustomerMove[];
+    expect(whyDatabaseNotSelectable(mine, 1042, { moves: planned })).toBe(
+      "a customer move of it is in progress",
+    );
   });
 });
