@@ -51,6 +51,13 @@ describe("canSubmitServer", () => {
     expect(canSubmitServer(true, true, probe(false))).toBe(false);
     expect(canSubmitServer(true, true, probe(true))).toBe(true);
   });
+
+  it("lets an operator save such an edit anyway, but never a new server", () => {
+    expect(canSubmitServer(true, true, probe(false), true)).toBe(true);
+    expect(canSubmitServer(true, true, null, true)).toBe(true);
+    expect(canSubmitServer(false, true, probe(false), true)).toBe(false);
+    expect(canSubmitServer(false, true, null, true)).toBe(false);
+  });
 });
 
 describe("connectionChanged", () => {

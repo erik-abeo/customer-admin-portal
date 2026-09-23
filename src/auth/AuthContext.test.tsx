@@ -174,6 +174,54 @@ describe("AuthProvider", () => {
     expect(getAuthStrategy()).toBeNull();
   });
 
+  it("clears the cache when another tab signs in as a different admin", () => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ adminName: "first", apiKey: "k1" }),
+    );
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    queryClient.setQueryData(["database-servers"], [{ RootUserPassword: "secret" }]);
+
+    act(() => {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ adminName: "second", apiKey: "k2" }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: STORAGE_KEY,
+          newValue: sessionStorage.getItem(STORAGE_KEY),
+        }),
+      );
+    });
+
+    expect(screen.getByTestId("state").textContent).toBe("auth:second");
+    expect(queryClient.getQueryData(["database-servers"])).toBeUndefined();
+  });
+
+  it("keeps the cache when a storage event repeats the same identity", () => {
+    const same = JSON.stringify({ adminName: "stable", apiKey: "k" });
+    sessionStorage.setItem(STORAGE_KEY, same);
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    queryClient.setQueryData(["databases"], []);
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: STORAGE_KEY, newValue: same }),
+      );
+    });
+
+    expect(queryClient.getQueryData(["databases"])).toEqual([]);
+  });
+
   it("ignores storage events for unrelated keys", () => {
     sessionStorage.setItem(
       STORAGE_KEY,

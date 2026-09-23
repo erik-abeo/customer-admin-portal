@@ -72,12 +72,17 @@ export const probeSslMode = (
  * Whether a server form may be submitted, given the probe result for exactly
  * the connection it would save (null when there is none, or it has changed).
  *
- * A new server, and an edit that changes how the service connects to one, is
- * only saved once a probe of that connection has passed. Everything the portal
- * does with a server afterwards, provisioning, minting keys, measuring
+ * A new server is only registered once a probe of it has passed. Everything the
+ * portal does with a server afterwards, provisioning, minting keys, measuring
  * capacity, moving customers onto it, needs the service to reach it and
- * administer it, which is what the probe checks. Saving one that fails would
- * only move the failure to the first migration. An edit that touches only the
+ * administer it, which is what the probe checks, and registering one that fails
+ * would only move the failure to the first migration.
+ *
+ * An edit that changes how the service connects to a server is held to the same
+ * probe, but an operator may save it anyway after saying so. The service does
+ * not gate updates, and there are legitimate edits a probe fails: a new CA staged
+ * before the server's certificate is rotated to it, or the password rotated on a
+ * server registered before the version floor. An edit that touches only the
  * name, description or security group has nothing new to prove and is not
  * gated.
  */
@@ -85,7 +90,9 @@ export function canSubmitServer(
   isEdit: boolean,
   changesConnection: boolean,
   probeResult: ProbeDatabaseServerResponse | null,
+  savingWithoutPassingProbe = false,
 ): boolean {
   if (isEdit && !changesConnection) return true;
-  return probeResult?.IsSupported === true;
+  if (probeResult?.IsSupported === true) return true;
+  return isEdit && savingWithoutPassingProbe;
 }

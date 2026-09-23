@@ -26,7 +26,15 @@ import type {
   GetStaticDatabaseUserResponse,
 } from "@/api/types";
 
-const NOW_ISO = "2026-04-30T18:00:00Z";
+/**
+ * "Now" for the seed, taken when this module loads. The demo store is built
+ * from these seeds in the same load (a reload re-seeds), so every seeded time is
+ * relative to the moment the demo started. A fixed date would put the seed in
+ * the past by however long ago it was written: demo mode's sweeper and expiry,
+ * which compare against the real clock, would then fail the live stream and
+ * expire the pending key on first load.
+ */
+const NOW_ISO = new Date().toISOString();
 const HOURS_AGO = (h: number) =>
   new Date(Date.parse(NOW_ISO) - h * 3_600_000).toISOString();
 const DAYS_AGO = (d: number) => HOURS_AGO(d * 24);

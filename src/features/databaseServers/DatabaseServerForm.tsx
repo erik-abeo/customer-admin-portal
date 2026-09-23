@@ -2,6 +2,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   Divider,
   FileButton,
   Group,
@@ -144,7 +145,12 @@ export function DatabaseServerForm({
   const probeInputs = JSON.stringify(connection);
   const probeResult = probed?.for === probeInputs ? probed.result : null;
   const changesConnection = initial ? connectionChanged(form.values, initial) : true;
-  const canSubmit = canSubmitServer(isEdit, changesConnection, probeResult);
+  // An acknowledgement belongs to the connection it was given for, like a probe
+  // result, so changing any connection field again withdraws it.
+  const [savingAnywayFor, setSavingAnywayFor] = useState<string | null>(null);
+  const savingWithoutPassingProbe = savingAnywayFor === probeInputs;
+  const canSubmit = canSubmitServer(isEdit, changesConnection, probeResult, savingWithoutPassingProbe);
+  const offerSaveAnyway = isEdit && changesConnection && probeResult?.IsSupported !== true;
 
   // The probe needs somewhere to connect and something to connect as. On edit
   // the stored password is used when the field is left blank.
@@ -437,6 +443,14 @@ export function DatabaseServerForm({
             {...form.getInputProps("Certificate")}
           />
         </FormSection>
+
+        {offerSaveAnyway && (
+          <Checkbox
+            label="Save without a passing probe. Use this only when the server is known to be reachable and a probe cannot pass yet, such as a new CA staged before the certificate rotates."
+            checked={savingWithoutPassingProbe}
+            onChange={(event) => setSavingAnywayFor(event.currentTarget.checked ? probeInputs : null)}
+          />
+        )}
 
         {!canSubmit && (
           <Text size="xs" c="dimmed" ta="right" id="server-register-hint">

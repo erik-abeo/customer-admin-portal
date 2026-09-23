@@ -4,7 +4,8 @@ import type { CustomerMove, DatabaseInfoItem } from "@/api/types";
 
 import {
   canCancelMove,
-  hasRetainedSource,
+  canDropMoveSource,
+  canRollBackMove,
   isActiveMove,
   whyDatabaseNotMovable,
 } from "./queries";
@@ -28,14 +29,37 @@ const database: DatabaseInfoItem = {
   Status: "active",
 };
 
-describe("hasRetainedSource", () => {
-  it("offers rollback and drop only for a cut-over move whose source is recorded and still there", () => {
-    expect(hasRetainedSource(move({}))).toBe(true);
-    expect(hasRetainedSource(move({ SourceDatabaseName: null }))).toBe(false);
+describe("canRollBackMove", () => {
+  it("offers rollback only for a cut-over move whose source is recorded and still there", () => {
+    expect(canRollBackMove(move({}))).toBe(true);
+    expect(canRollBackMove(move({ SourceDatabaseName: null }))).toBe(false);
+    expect(canRollBackMove(move({ SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" }))).toBe(
+      false,
+    );
+    expect(canRollBackMove(move({ Status: "settled" }))).toBe(false);
+  });
+});
+
+describe("canDropMoveSource", () => {
+  it("offers the drop after cutover while the source is still there", () => {
+    expect(canDropMoveSource(move({}))).toBe(true);
+    expect(canDropMoveSource(move({ SourceDatabaseName: null }))).toBe(false);
     expect(
-      hasRetainedSource(move({ SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" })),
+      canDropMoveSource(move({ SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" })),
     ).toBe(false);
-    expect(hasRetainedSource(move({ Status: "settled" }))).toBe(false);
+  });
+
+  it("offers it again for a drop interrupted after the move was settled", () => {
+    expect(canDropMoveSource(move({ Status: "settled" }))).toBe(true);
+    expect(
+      canDropMoveSource(
+        move({ Status: "settled", SourceDroppedDateTimeUtc: "2026-09-22T12:00:00Z" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is not offered before cutover", () => {
+    expect(canDropMoveSource(move({ Status: "copying" }))).toBe(false);
   });
 });
 

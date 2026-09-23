@@ -34,9 +34,12 @@ export function useRefreshOnStatusChange(
   const qc = useQueryClient();
   const seen = useRef<Map<number, string | null>>(new Map());
   // Held in a ref so a caller passing a fresh array each render does not re-run
-  // the effect; only new data should.
+  // the effect below; only new data should. Synced in an effect, not during
+  // render, and declared first so it has run before the one that reads it.
   const keys = useRef(refresh);
-  keys.current = refresh;
+  useEffect(() => {
+    keys.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     if (!items) return;

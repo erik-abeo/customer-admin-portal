@@ -27,15 +27,25 @@ export const isActiveMove = (status: string | null | undefined): boolean =>
 export const canCancelMove = (status: string | null | undefined): boolean =>
   CANCELLABLE.has(status ?? "");
 
+const hasRecordedSource = (move: CustomerMove): boolean =>
+  !move.SourceDroppedDateTimeUtc && Boolean(move.SourceDatabaseName?.trim());
+
 /**
- * Whether a move still has a retained source to roll back to or drop: cut over,
- * source not yet dropped, and its name recorded. The service refuses both
- * actions for a move with no recorded source name, so they are not offered.
+ * Whether a move can be rolled back: cut over, source still there and its name
+ * recorded. The service refuses a move with no recorded source name.
  */
-export const hasRetainedSource = (move: CustomerMove): boolean =>
-  move.Status === "flipped" &&
-  !move.SourceDroppedDateTimeUtc &&
-  Boolean(move.SourceDatabaseName?.trim());
+export const canRollBackMove = (move: CustomerMove): boolean =>
+  move.Status === "flipped" && hasRecordedSource(move);
+
+/**
+ * Whether a move's source can be dropped: cut over with the source still there,
+ * or settled by a drop that never finished. The service claims a move by
+ * settling it before it drops the source, so a drop interrupted after that claim
+ * leaves it settled with no drop recorded, and the service finishes it when
+ * asked again.
+ */
+export const canDropMoveSource = (move: CustomerMove): boolean =>
+  (move.Status === "flipped" || move.Status === "settled") && hasRecordedSource(move);
 
 /**
  * Why a database cannot be moved now, or null when it can: it is not active, or

@@ -33,7 +33,8 @@ import { useDatabaseServers } from "@/features/databaseServers/queries";
 import { isSafeDatabaseName } from "@/features/migrations/migrationTarget";
 import {
   canCancelMove,
-  hasRetainedSource,
+  canDropMoveSource,
+  canRollBackMove,
   whyDatabaseNotMovable,
   useCancelCustomerMove,
   useCreateCustomerMove,
@@ -312,27 +313,27 @@ export function MovesPage() {
                 Cancel
               </Button>
             )}
-            {hasRetainedSource(move) && (
-              <>
-                <Button
-                  size="compact-sm"
-                  variant="subtle"
-                  color="orange"
-                  aria-label={`Roll back the move for customer ${move.CrystalPmId}`}
-                  onClick={() => confirmRollBack(move)}
-                >
-                  Roll back
-                </Button>
-                <Button
-                  size="compact-sm"
-                  variant="subtle"
-                  color="red"
-                  aria-label={`Drop the source of the move for customer ${move.CrystalPmId}`}
-                  onClick={() => confirmDropSource(move)}
-                >
-                  Drop source
-                </Button>
-              </>
+            {canRollBackMove(move) && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                color="orange"
+                aria-label={`Roll back the move for customer ${move.CrystalPmId}`}
+                onClick={() => confirmRollBack(move)}
+              >
+                Roll back
+              </Button>
+            )}
+            {canDropMoveSource(move) && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                color="red"
+                aria-label={`Drop the source of the move for customer ${move.CrystalPmId}`}
+                onClick={() => confirmDropSource(move)}
+              >
+                {move.Status === "settled" ? "Finish dropping source" : "Drop source"}
+              </Button>
             )}
           </RequireRole>
         </Group>

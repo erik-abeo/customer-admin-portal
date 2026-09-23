@@ -130,11 +130,16 @@ it failed rather than only that it was rejected.
 
 The portal will not submit a new server until a probe of exactly the address,
 port, login, password and certificate being registered has returned
-`IsSupported: true`. Changing any of them clears the result. An edit is held to
-the same rule whenever it changes any of those five from what is stored; an edit
-that changes only the name, description or security group is not gated. The
-service does not probe again on create or update, so this is the portal's rule
-rather than the API's.
+`IsSupported: true`. Changing any of them clears the result. An edit that
+changes any of those five from what is stored is held to the same probe, but
+the operator may save it without a passing one by ticking "Save without a
+passing probe". There are legitimate edits a probe fails, such as a new CA
+staged before the server's certificate is rotated to it. The acknowledgement
+belongs to the connection it was given for, so changing a connection field again
+withdraws it. A new server has no such option. An edit that changes only the
+name, description or security group is not gated. The service does not probe
+again on create or update, so all of this is the portal's rule rather than the
+API's.
 
 On edit, a blank password or certificate field means "keep the stored one", and
 the probe uses the stored value in its place. That works because
@@ -290,8 +295,17 @@ the customer is put back online.
 
 `flipped` means cut over **with the source retained**. Rolling back is a single
 row update while that is true, which is why dropping the source is a separate
-action and the only irreversible one. Offer `roll-back` and `drop-source` only
-for `flipped` with `SourceDroppedDateTimeUtc` null. Rolling back points the
+action and the only irreversible one. Offer `roll-back` only for `flipped` with
+`SourceDroppedDateTimeUtc` null and `SourceDatabaseName` recorded; the service
+refuses a move with no recorded source name.
+
+`drop-source` is offered for the same `flipped` moves, and also for a `settled`
+move with `SourceDroppedDateTimeUtc` still null. The service claims a move by
+settling it before it drops the source, so a drop interrupted after that claim,
+by a crash or a restart, leaves the move settled with no drop recorded. Calling
+`drop-source` again finishes it; the portal labels that "Finish dropping
+source". A settled move cannot be rolled back, so there is nothing left to
+protect by keeping the source. Rolling back points the
 customer at the source as it was at cutover: anything written on the target
 since then stays on the target and is not carried back, and the UI should say
 so before the operator confirms.

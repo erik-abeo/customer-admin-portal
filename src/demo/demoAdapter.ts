@@ -744,9 +744,34 @@ const ROUTES: Route[] = [
       const req = body as UpdateDatabaseServerInfoRequest;
       const idx = demoStore.servers.findIndex((s) => s.Id === req.Id);
       if (idx === -1) return notFound(`Database server ${req.Id} not found`);
-      demoStore.servers[idx] = { ...demoStore.servers[idx], ...req };
-      demoStore.recordAdminEvent(`Updated database server ${req.Name}`);
-      return ok({ Success: true, Message: null });
+
+      // Field by field, as the service applies an update: a string that is
+      // null, empty or whitespace leaves the stored value alone, and a port only
+      // counts when positive. SecurityGroupId alone can be cleared: null leaves
+      // it, and an empty string stores null.
+      const stored = demoStore.servers[idx];
+      const given = (value: string | null | undefined) =>
+        value !== null && value !== undefined && value.trim().length > 0;
+      const next = { ...stored };
+      if (given(req.Name)) next.Name = req.Name;
+      if (given(req.Description)) next.Description = req.Description;
+      if (given(req.LocalServerAddress))
+        next.LocalServerAddress = req.LocalServerAddress;
+      if (given(req.RemoteServerAddress))
+        next.RemoteServerAddress = req.RemoteServerAddress;
+      if (req.ServerPort > 0) next.ServerPort = req.ServerPort;
+      if (given(req.RootUserPassword)) next.RootUserPassword = req.RootUserPassword;
+      if (given(req.Certificate)) next.Certificate = req.Certificate;
+      if (given(req.AdminUserName)) next.AdminUserName = req.AdminUserName.trim();
+      if (req.SecurityGroupId !== null && req.SecurityGroupId !== undefined)
+        next.SecurityGroupId = req.SecurityGroupId.trim() ? req.SecurityGroupId : null;
+
+      demoStore.servers[idx] = next;
+      demoStore.recordAdminEvent(`Updated database server ${next.Name}`);
+      return ok({
+        Success: true,
+        Message: "Database server info updated successfully",
+      });
     },
   },
   {

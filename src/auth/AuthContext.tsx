@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -56,6 +57,11 @@ function applyToHttpClient(value: StoredAuth | null): void {
   }
 }
 
+/** Same admin with the same key, so what is cached was fetched with their access. */
+function sameIdentity(a: StoredAuth | null, b: StoredAuth | null): boolean {
+  return a?.adminName === b?.adminName && a?.apiKey === b?.apiKey;
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   // Mounted inside QueryClientProvider (see App.tsx), so the client comes from
   // context rather than an import, and nothing here depends on App.
@@ -68,29 +74,42 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return initial;
   });
 
+  // The identity the cache was filled under, read by the storage listener
+  // without re-subscribing it on every change.
+  const current = useRef(stored);
+  useEffect(() => {
+    current.current = stored;
+  }, [stored]);
+
   // Cross-tab sign-in / sign-out: react to storage changes from other tabs
-  // so the UI doesn't drift from the actual auth state.
+  // so the UI doesn't drift from the actual auth state. Whenever the identity
+  // changes, signed out or signed in as someone else, the cache goes with it:
+  // what one admin fetched is not the next one's to see.
   useEffect(() => {
     function onStorage(event: StorageEvent) {
       if (event.key !== STORAGE_KEY) return;
       const next = readStored();
+      if (!sameIdentity(current.current, next)) queryClient.clear();
       setStored(next);
       applyToHttpClient(next);
-      if (next === null) queryClient.clear();
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [queryClient]);
 
-  const signIn = useCallback((adminName: string, apiKey: string) => {
-    const next: StoredAuth = {
-      adminName: adminName.trim(),
-      apiKey: apiKey.trim(),
-    };
-    writeStored(next);
-    applyToHttpClient(next);
-    setStored(next);
-  }, []);
+  const signIn = useCallback(
+    (adminName: string, apiKey: string) => {
+      const next: StoredAuth = {
+        adminName: adminName.trim(),
+        apiKey: apiKey.trim(),
+      };
+      if (!sameIdentity(current.current, next)) queryClient.clear();
+      writeStored(next);
+      applyToHttpClient(next);
+      setStored(next);
+    },
+    [queryClient],
+  );
 
   // Clears every cached query and mutation as well. Server records carry their
   // decrypted administrator passwords, and a minted migration key sits in its
