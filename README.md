@@ -210,16 +210,16 @@ corresponding pages or controls are scaffolded behind feature flags. See
 [BACKEND-CONTRACT.md](./BACKEND-CONTRACT.md) for the authoritative API
 contract.
 
-| Spec item                                      | Required endpoint(s)                                                                                                                                                               | Notes                                                                               |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Delete database server                         | `DELETE /My/delete-database-server-info/{id}`                                                                                                                                      | Should also reject when databases are still attached.                               |
-| Delete database                                | `DELETE /My/delete-database-info/{id}`                                                                                                                                             |                                                                                     |
-| Delete static DB user                          | `DELETE /My/delete-static-database-user/{id}` (or `{serverId}/{userId}`)                                                                                                           | Should also `DROP USER` on each MariaDB server it was provisioned on.               |
-| Active sessions metric / list / kill from UI   | `GET /My/database-user-cache?onlyInUse=true` returning `{userName, databaseServerId, databaseId, since}`; pair with the existing `KillDatabaseUser` for an admin kill action.      | `database_user_cache.in_use` already tracks this — only a list endpoint is missing. |
-| Recent events metric on dashboard              | `GET /My/event-log/recent?limit=10`                                                                                                                                                | Returns most recent events across all customers.                                    |
-| Event Log Viewer (filter / paginate / export)  | `GET /My/event-log` with `userEmail`, `ipAddress`, `databaseServerId`, `databaseId`, `fromUtc`, `toUtc`, `page`, `pageSize`. Optional `GET /My/event-log/export.csv`.              | `EventLogService` already populates the table.                                      |
-| Role-based access control (Admin vs Read-only) | Issue a role claim from Supertokens; enforce via `[Authorize(Roles=...)]` on management endpoints and a `/My/whoami` endpoint the SPA can call to hide write controls.             | Belongs in the same auth migration that replaces the static API key.                |
-| Per-action audit trail of admin actions        | `POST /My/admin-audit-log` accepting the entries currently buffered by `src/lib/auditLog.ts`. Alternatively, have each write endpoint emit its own `event_log` row.                | `X-Admin-User` is already attached on every request the SPA makes.                  |
+| Spec item                                      | Required endpoint(s)                                                                                                                                                          | Notes                                                                               |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Delete database server                         | `DELETE /My/delete-database-server-info/{id}`                                                                                                                                 | Should also reject when databases are still attached.                               |
+| Delete database                                | `DELETE /My/delete-database-info/{id}`                                                                                                                                        |                                                                                     |
+| Delete static DB user                          | `DELETE /My/delete-static-database-user/{id}` (or `{serverId}/{userId}`)                                                                                                      | Should also `DROP USER` on each MariaDB server it was provisioned on.               |
+| Active sessions metric / list / kill from UI   | `GET /My/database-user-cache?onlyInUse=true` returning `{userName, databaseServerId, databaseId, since}`; pair with the existing `KillDatabaseUser` for an admin kill action. | `database_user_cache.in_use` already tracks this — only a list endpoint is missing. |
+| Recent events metric on dashboard              | `GET /My/event-log/recent?limit=10`                                                                                                                                           | Returns most recent events across all customers.                                    |
+| Event Log Viewer (filter / paginate / export)  | `GET /My/event-log` with `userEmail`, `ipAddress`, `databaseServerId`, `databaseId`, `fromUtc`, `toUtc`, `page`, `pageSize`. Optional `GET /My/event-log/export.csv`.         | `EventLogService` already populates the table.                                      |
+| Role-based access control (Admin vs Read-only) | Issue a role claim from Supertokens; enforce via `[Authorize(Roles=...)]` on management endpoints and a `/My/whoami` endpoint the SPA can call to hide write controls.        | Belongs in the same auth migration that replaces the static API key.                |
+| Per-action audit trail of admin actions        | `POST /My/admin-audit-log` accepting the entries currently buffered by `src/lib/auditLog.ts`. Alternatively, have each write endpoint emit its own `event_log` row.           | `X-Admin-User` is already attached on every request the SPA makes.                  |
 
 When any of those endpoints land, the corresponding page or control already
 has its types, form, and TanStack Query hook plumbing in place — flipping
@@ -240,6 +240,28 @@ them on is a small, isolated change.
 | `npm test`              | Run the Vitest suite once.                                         |
 | `npm run test:watch`    | Vitest watch mode.                                                 |
 | `npm run test:coverage` | Vitest with V8 coverage (HTML + text reports under `coverage/`).   |
+| `npm run test:e2e`      | Playwright against the production build, with the API mocked.      |
+| `npm run test:e2e:live` | Playwright against the real API and databases (see below).         |
+
+### Live end-to-end suite
+
+`npm run test:e2e:live` drives the real portal build against the real
+`ClientRemoteDatabaseAccessAPI` and real MySQL 8.4 and MariaDB 10.6 servers:
+registering servers by probe, migration keys, a redemption, discard, and customer
+moves through flip, rollback and drop-source, with accessibility checks on those
+pages. It needs Docker, the .NET 8 SDK and a checkout of crystalpm next to this
+repository (or `CPM_REPO` set to one). Start the API's test containers first:
+
+```
+docker compose -f <crystalpm>/tests/ClientRemoteDatabaseAccessAPI.Tests/docker-compose.test.yml up -d
+```
+
+The suite builds its own authorization database, starts the API as a process
+with every production setting overridden, and serves the portal with `/My`
+proxied to it, the way the portal's nginx reaches the gateway in production.
+Don't run it at the same time as the API's integration tests, which sweep test
+schemas and logins on the same containers. `CPM_LIVE_KEEP=1` keeps its data
+afterwards for debugging.
 
 ## Deploying with Docker
 

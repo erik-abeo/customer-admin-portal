@@ -207,12 +207,17 @@ export const theme = createTheme({
         radius: "md",
         centered: true,
         overlayProps: { backgroundOpacity: 0.55, blur: 4 },
+        // Mantine's close button is an icon with no text, so without this every
+        // modal's close button has no accessible name (WCAG 4.1.2).
+        closeButtonProps: { "aria-label": "Close" },
       },
     }),
     Notification: Notification.extend({
       defaultProps: {
         radius: "md",
         withBorder: true,
+        // As for Modal: the close button is an icon only and needs a name.
+        closeButtonProps: { "aria-label": "Dismiss notification" },
       },
     }),
   },

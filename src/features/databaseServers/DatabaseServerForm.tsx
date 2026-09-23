@@ -49,7 +49,6 @@ import {
   maxLength,
   port,
   required,
-  strongPassword,
 } from "@/lib/validators";
 
 export interface DatabaseServerFormValues {
@@ -112,14 +111,13 @@ export function DatabaseServerForm({
         required("Administrator username"),
         maxLength(64, "Administrator username"),
       ),
+      // The server's existing administrator password, not one the portal chooses, so it is
+      // taken as it is: a complexity rule here would refuse a real server whose password
+      // does not meet it. The probe is what proves it works. Edit mode: empty keeps the
+      // stored one.
       RootUserPassword: (v) => {
-        if (!isEdit) {
-          if (v.length === 0) return "Root password is required";
-          return strongPassword("Root password")(v);
-        }
-        // Edit mode: empty means "keep existing"; only validate when set.
-        if (v.length > 0) return strongPassword("Root password")(v);
-        return null;
+        if (!isEdit && v.length === 0) return "Administrator password is required";
+        return maxLength(256, "Administrator password")(v);
       },
       // The API needs a CA certificate to administer the server at all, and refuses to
       // register one without it. Asked for here so the operator hears it from the form,
