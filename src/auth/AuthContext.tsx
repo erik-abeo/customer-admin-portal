@@ -14,6 +14,7 @@ import {
   setAuthStrategy,
 } from "@/api/httpClient";
 import { AuthContext, type AuthState } from "@/auth/authContextValue";
+import { setCurrentRole } from "@/auth/roles";
 import { clearAuditEntries } from "@/lib/auditLog";
 
 const STORAGE_KEY = "cap.auth.v1";
@@ -107,6 +108,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
         apiKey: apiKey.trim(),
       };
       if (!sameIdentity(current.current, next)) queryClient.clear();
+      // A role belongs to the session that received it: the next admin's
+      // comes with their first response.
+      setCurrentRole(null);
       writeStored(next);
       applyToHttpClient(next);
       setStored(next);
@@ -126,6 +130,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setStored(null);
     queryClient.clear();
     clearAuditEntries();
+    setCurrentRole(null);
   }, [queryClient]);
 
   const value = useMemo<AuthState>(

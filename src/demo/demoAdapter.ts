@@ -1117,7 +1117,9 @@ const ROUTES: Route[] = [
     handle: ({ body }) => {
       const req = body as UpdateDatabaseServerInfoRequest;
       const idx = demoStore.servers.findIndex((s) => s.Id === req.Id);
-      if (idx === -1) return notFound(`Database server ${req.Id} not found`);
+      // An unknown id updates no row, which the service answers as a 200.
+      if (idx === -1)
+        return ok({ Success: false, Message: "Failed to update database server info" });
 
       // Field by field, as the service applies an update: a string that is
       // null, empty or whitespace leaves the stored value alone. The service
@@ -1231,7 +1233,9 @@ const ROUTES: Route[] = [
     handle: ({ body }) => {
       const req = body as UpdateDatabaseInfoRequest;
       const idx = demoStore.databases.findIndex((d) => d.Id === req.Id);
-      if (idx === -1) return notFound(`Database ${req.Id} not found`);
+      // An unknown id updates no row, which the service answers as a 200.
+      if (idx === -1)
+        return ok({ Success: false, Message: "Failed to update database info" });
       const current = demoStore.databases[idx];
       // As the service: blank strings are skipped, and a change of server or
       // name is written only if it is no change, or the database is active
@@ -1565,7 +1569,24 @@ const ROUTES: Route[] = [
       // The list groups by UserName, so an "update" affects every row for
       // this user across servers.
       const all = demoStore.staticUsers.filter((u) => u.UserName === req.UserName);
-      if (all.length === 0) return notFound(`Static user ${req.UserName} not found`);
+      // The service's two whole-request refusals, plain strings, checked first.
+      if (
+        !req.Id ||
+        req.Id <= 0 ||
+        !req.UserName ||
+        !req.Servers ||
+        req.Servers.length === 0
+      )
+        return {
+          status: 400,
+          data: "Invalid request. Id, UserName, and Server information are required.",
+        };
+      if (
+        !demoStore.staticUsers.some(
+          (u) => u.Id === req.Id && u.UserName === req.UserName,
+        )
+      )
+        return { status: 400, data: "Invalid user Id or UserName." };
       const refused = ungrantableServers(req.Servers);
       if (refused)
         return ok<UpdateStaticDatabaseUserResponse>({
@@ -1848,6 +1869,15 @@ export async function demoAdapter(
       ? url
       : `${baseURL.replace(/\/+$/, "")}${url.startsWith("/") ? url : `/${url}`}`;
   const { path, search } = relativePath(fullUrl, "/My");
+  // Query values passed as axios `params` (the capacity history's days, the
+  // event log's filters) are not in the URL yet when the adapter runs, so they
+  // are merged in here, as axios would serialize them: empty values dropped.
+  for (const [key, value] of Object.entries(
+    (config.params ?? {}) as Record<string, unknown>,
+  )) {
+    if (value === undefined || value === null || value === "") continue;
+    search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+  }
   const method = (config.method ?? "get").toUpperCase();
 
   await delay();

@@ -133,4 +133,15 @@ test.describe("Keyboard navigation", () => {
       page.getByRole("button", { name: "Close navigation" }),
     ).toHaveAttribute("aria-expanded", "true");
   });
+
+  test("header controls are named starting with the text they show", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    // WCAG 2.5.3: a voice user says what they see.
+    await expect(page.getByRole("button", { name: /^Jump to/ })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Erik, account menu$/ }),
+    ).toBeVisible();
+  });
 });

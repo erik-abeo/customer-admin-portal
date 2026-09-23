@@ -15,12 +15,13 @@ import { refusedOutright } from "@/features/staticUsers/outcome";
 import { demoAdapter } from "./demoAdapter";
 import { demoStore } from "./demoStore";
 
-async function call(method: string, url: string, body?: unknown) {
+async function call(method: string, url: string, body?: unknown, params?: object) {
   const config = {
     method,
     url: `/My${url}`,
     headers: new AxiosHeaders(),
     data: body === undefined ? undefined : JSON.stringify(body),
+    params,
   } as InternalAxiosRequestConfig;
   return demoAdapter(config);
 }
@@ -852,5 +853,75 @@ describe("demo answers as the service for unknown ids and taken emails", () => {
       DatabaseMappings: first!.DatabaseMappings,
     });
     expect(own.status).toBe(200);
+  });
+});
+
+describe("demo reads axios params, as the real calls pass them", () => {
+  it("honours the capacity history's days", async () => {
+    const res = await call("get", "/get-server-capacity-history/1", undefined, {
+      days: 7,
+    });
+    expect((res.data as { Days: number }).Days).toBe(7);
+  });
+
+  it("honours the event log's filters and drops empty ones", async () => {
+    const all = await call("get", "/event-log", undefined, { page: 1, pageSize: 200 });
+    const filtered = await call("get", "/event-log", undefined, {
+      page: 1,
+      pageSize: 200,
+      eventType: "AdminAction",
+      userEmail: "",
+    });
+    const total = (all.data as { TotalCount: number }).TotalCount;
+    const some = filtered.data as {
+      Items: { EventType: string }[];
+      TotalCount: number;
+    };
+    expect(some.TotalCount).toBeLessThan(total);
+    for (const item of some.Items) expect(item.EventType).toBe("AdminAction");
+  });
+});
+
+describe("demo answers stale ids as the service does", () => {
+  it("answers an update of an unknown server or database with 200 and Success false", async () => {
+    const server = await call("put", "/update-database-server-info", {
+      Id: 9999,
+      ServerPort: 3306,
+    });
+    expect(server.status).toBe(200);
+    expect(server.data).toEqual({
+      Success: false,
+      Message: "Failed to update database server info",
+    });
+    const database = await call("put", "/update-database-info", { Id: 9999 });
+    expect(database.status).toBe(200);
+    expect(database.data).toEqual({
+      Success: false,
+      Message: "Failed to update database info",
+    });
+  });
+
+  it("refuses a static user update whose Id and name disagree, or with no servers", async () => {
+    const mismatch = await call("put", "/update-static-database-user", {
+      Id: 1,
+      UserName: "static_initech_replica",
+      GenerateNewPassword: false,
+      NewDescription: null,
+      Servers: [{ ServerId: 1, Databases: [] }],
+    });
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.data).toBe("Invalid user Id or UserName.");
+
+    const empty = await call("put", "/update-static-database-user", {
+      Id: 1,
+      UserName: "static_acme_etl",
+      GenerateNewPassword: false,
+      NewDescription: null,
+      Servers: [],
+    });
+    expect(empty.status).toBe(400);
+    expect(empty.data).toBe(
+      "Invalid request. Id, UserName, and Server information are required.",
+    );
   });
 });

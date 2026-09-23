@@ -44,19 +44,21 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts index.html ./
+COPY tsconfig.app.json tsconfig.node.json vite.config.ts index.html ./
 COPY eslint.config.js .prettierrc.json .prettierignore ./
 COPY src ./src
 COPY public ./public
 
-RUN npm run typecheck \
- && npm run build
+# Typechecks the app and the Vite config only, then builds. `npm run build`
+# would run `tsc -b`, which follows tsconfig.json into the e2e project, and
+# the tests are not in the image. CI's `npm run typecheck` still covers e2e.
+RUN npx tsc -p tsconfig.app.json --noEmit \
+ && npx tsc -p tsconfig.node.json --noEmit \
+ && npx vite build
 
-# Source maps are emitted as "hidden" (no //# sourceMappingURL=) so they
-# can be uploaded to Sentry but never reach customers. Strip them from
-# the artifact that gets shipped to the runtime stage. CI is responsible
-# for `sentry-cli sourcemaps upload dist/` *before* this point if Sentry
-# integration is desired.
+# Source maps are emitted as "hidden" (no //# sourceMappingURL=), and are
+# stripped here so they never reach customers. Nothing uploads them to Sentry
+# today; deploy/README.md describes how a CI job could, from its own build.
 RUN find /app/dist -name "*.map" -type f -delete
 
 # ---- Stage 2: serve via nginx ---------------------------------------------

@@ -5,6 +5,8 @@
  */
 import { Group, Pagination, Select, Text } from "@mantine/core";
 
+import { paginationControlProps } from "./paginationLabels";
+
 const PAGE_SIZE_OPTIONS = ["10", "25", "50", "100"] as const;
 
 interface ListPaginationProps {
@@ -71,6 +73,7 @@ export function ListPagination({
           siblings={1}
           boundaries={1}
           aria-label="Pagination"
+          getControlProps={paginationControlProps}
         />
       </Group>
     </Group>

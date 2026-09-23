@@ -32,6 +32,7 @@ import { useMemo, useState } from "react";
 import { eventLogApi } from "@/api/eventLog";
 import type { EventLogEntry, EventLogQueryParams } from "@/api/types";
 import { PageHeader } from "@/components/common/PageHeader";
+import { paginationControlProps } from "@/components/common/paginationLabels";
 import { QueryStatus } from "@/components/common/QueryStatus";
 import { features } from "@/config/env";
 import { useDatabaseServers } from "@/features/databaseServers/queries";
@@ -386,7 +387,13 @@ function EventLogLive() {
                 totalCount,
               )} of ${totalCount}`}
             </Text>
-            <Pagination value={page} onChange={setPage} total={pageCount} />
+            <Pagination
+              value={page}
+              onChange={setPage}
+              total={pageCount}
+              aria-label="Event log pages"
+              getControlProps={paginationControlProps}
+            />
           </Group>
         )}
       </Stack>

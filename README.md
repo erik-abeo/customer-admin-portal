@@ -142,8 +142,8 @@ restrict who can reach it:
 
 `src/lib/auditLog.ts` registers a response observer that records every
 `POST`/`PUT`/`PATCH`/`DELETE` along with the admin name, URL, status, and
-duration. Today it logs to the dev console and keeps a 200-entry ring
-buffer. With `VITE_FEATURE_AUDIT_SINK` on and `VITE_AUDIT_SINK_URL` set,
+duration. Every build keeps the last 200 entries in memory; only development
+builds also log each one to the console. With `VITE_FEATURE_AUDIT_SINK` on and `VITE_AUDIT_SINK_URL` set,
 `src/lib/auditSink.ts` also POSTs each entry to that URL. When the backend
 ships an `admin_audit_log` endpoint, pointing the sink URL at it is the only
 change needed.
@@ -310,13 +310,21 @@ docker build \
 docker run --rm -p 8080:8080 customer-admin-portal:$(git rev-parse --short HEAD)
 ```
 
+Run like this, outside AWS, the page loads but signing in and every `/api` call
+return 502: the image's nginx resolves the gateway through the Amazon DNS server
+(`169.254.169.253`), which only answers inside a VPC. To try it locally, change
+`resolver` in `deploy/nginx.conf` to one your network has (for example
+`127.0.0.11` on a user-defined Docker network) and rebuild, or use demo mode
+(`npm run demo`) instead.
+
 When the SPA is configured with `VITE_API_BASE_URL=/api`, the included
 `deploy/nginx.conf` proxies `/api/*` to the ASP.NET service. This avoids
-CORS entirely and lets you serve everything from a single origin. To point it at
-another gateway, change three things together and rebuild: `proxy_pass` and
-`proxy_ssl_name` in `deploy/nginx.conf`, and `connect-src` in
-`deploy/security-headers.conf`. The proxy verifies the gateway's certificate
-against the image's CA bundle.
+CORS entirely and lets you serve everything from a single origin. The gateway is
+set once, by `set $gateway` in `deploy/nginx.conf`, and both `proxy_pass` and
+`proxy_ssl_name` read it. To point the portal at another gateway, change that
+line, change `resolver` too if it will not run inside AWS, update `connect-src`
+in `deploy/security-headers.conf` if you list the gateway there, and rebuild.
+The proxy verifies the gateway's certificate against the image's CA bundle.
 
 `deploy/nginx.conf` also ships:
 

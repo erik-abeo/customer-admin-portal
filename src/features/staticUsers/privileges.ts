@@ -7,6 +7,7 @@ import type {
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
 import { isUnsettledMove } from "@/features/moves/queries";
+import { type ListInput, toKnownList, whyListUnknown } from "@/lib/knownList";
 
 /**
  * The privileges the service turns into a GRANT, in the order the editor shows
@@ -46,12 +47,15 @@ export const whyNotGrantableStatus = (
  */
 export const whyNotGrantable = (
   database: DatabaseInfoItem | undefined,
-  moves: ReadonlyArray<CustomerMove> = [],
+  movesInput: ListInput<CustomerMove> = [],
 ): string | null => {
   if (!database) return null;
   const status = whyNotGrantableStatus(database.Status);
   if (status) return status;
-  return moves.some((m) => m.DatabaseId === database.Id && isUnsettledMove(m))
+  const moves = toKnownList(movesInput);
+  const unknown = whyListUnknown(moves, "customer moves");
+  if (unknown) return unknown;
+  return moves.items.some((m) => m.DatabaseId === database.Id && isUnsettledMove(m))
     ? "a customer move of it is still in progress or can still be rolled back"
     : null;
 };
@@ -67,7 +71,7 @@ export const whyPrivilegesIncomplete = (
   grids: DatabaseServerPrivilegeInfo[],
   servers: DatabaseServerInfoItem[],
   databases: DatabaseInfoItem[],
-  moves: ReadonlyArray<CustomerMove> = [],
+  moves: ListInput<CustomerMove> = [],
 ): string | null => {
   const where = (serverId: number, databaseId: number) => {
     const database =

@@ -164,4 +164,14 @@ test.describe("Accessibility (post-auth)", () => {
       await scan(page, `field errors (${scheme})`, { modalOpen: true });
     });
   }
+
+  test("a list with more than one page is accessible", async ({ page }) => {
+    await installApiMocks(page, { manyServers: true });
+    await page.goto("/database-servers");
+    await expect(page.getByText("bulk-server-01")).toBeVisible();
+    // The arrow controls are icon buttons; they must be named.
+    await expect(page.getByRole("button", { name: "Next page" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Previous page" })).toBeVisible();
+    await scan(page, "Multi-page list");
+  });
 });

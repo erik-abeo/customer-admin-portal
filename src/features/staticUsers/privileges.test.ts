@@ -10,6 +10,7 @@ import {
 import {
   GRANTABLE_PRIVILEGES,
   hasGrantablePrivilege,
+  whyNotGrantable,
   whyNotGrantableStatus,
   whyPrivilegesIncomplete,
   withoutGrantOption,
@@ -157,5 +158,23 @@ describe("static user privileges", () => {
     ).toContain(
       "tenant_acme on east-1 (a customer move of it is still in progress or can still be rolled back)",
     );
+  });
+});
+
+describe("whyNotGrantable while moves load or fail", () => {
+  const active = {
+    Id: 100,
+    DatabaseServerId: 1,
+    DatabaseName: "tenant_acme",
+    Status: "active",
+  } as DatabaseInfoItem;
+  it("does not offer a database while moves are unknown", () => {
+    expect(whyNotGrantable(active, { items: [], status: "loading" })).toBe(
+      "checking customer moves",
+    );
+    expect(whyNotGrantable(active, { items: [], status: "error" })).toBe(
+      "customer moves could not be read, so it cannot be checked",
+    );
+    expect(whyNotGrantable(active, [])).toBeNull();
   });
 });

@@ -25,6 +25,8 @@ import type {
 import { FormSection } from "@/components/common/FormSection";
 import { composeValidators, maxLength, notClearable } from "@/lib/validators";
 
+import type { ListInput } from "@/lib/knownList";
+
 import { PrivilegesEditor } from "./PrivilegesEditor";
 import { whyPrivilegesIncomplete, withoutGrantOption } from "./privileges";
 
@@ -51,7 +53,7 @@ interface StaticUserFormProps {
    */
   refusal?: { title: string; reasons: string[] } | null;
   /** Customer moves; a database with an unsettled move cannot be granted. */
-  moves?: CustomerMove[];
+  moves?: ListInput<CustomerMove>;
 }
 
 export function StaticUserForm({

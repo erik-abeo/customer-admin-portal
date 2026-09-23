@@ -198,3 +198,14 @@ describe("whyDatabaseNotMovable with static grants", () => {
     ).toBe("static user grants could not be read, so it cannot be checked");
   });
 });
+
+describe("whyDatabaseNotMovable while its lists load or fail", () => {
+  it("does not offer a database while moves or migrations are unknown", () => {
+    expect(whyDatabaseNotMovable(database, { items: [], status: "loading" })).toBe(
+      "checking customer moves",
+    );
+    expect(whyDatabaseNotMovable(database, [], { items: [], status: "error" })).toBe(
+      "migrations could not be read, so it cannot be checked",
+    );
+  });
+});

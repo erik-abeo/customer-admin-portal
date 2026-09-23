@@ -159,7 +159,9 @@ export function AppLayout() {
               <Tooltip label="Open command palette (Ctrl+K / Cmd+K)">
                 <UnstyledButton
                   onClick={() => spotlight.open()}
-                  aria-label="Open command palette"
+                  // Starts with the visible "Jump to" text, so a voice user
+                  // saying what they see reaches it (WCAG 2.5.3).
+                  aria-label="Jump to... (open the command palette)"
                   className="command-palette-trigger"
                   visibleFrom="sm"
                 >
@@ -223,7 +225,8 @@ export function AppLayout() {
               {adminName && (
                 <Menu shadow="md" width={240} position="bottom-end">
                   <Menu.Target>
-                    <UnstyledButton aria-label="Account menu">
+                    {/* Starts with the admin name it shows (WCAG 2.5.3). */}
+                    <UnstyledButton aria-label={`${adminName}, account menu`}>
                       <Group gap="xs">
                         <Avatar size="sm" radius="xl" color="crystal">
                           {initialsOf(adminName)}

@@ -9,6 +9,7 @@ import type {
   MigrationSessionItem,
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
+import { type ListInput, toKnownList, whyListUnknown } from "@/lib/knownList";
 import type { StaticGrantCounts } from "@/features/staticUsers/queries";
 import { useRefreshOnStatusChange } from "@/lib/statusChanges";
 
@@ -77,12 +78,19 @@ export const isUnsettledMove = (move: CustomerMove): boolean =>
  */
 export const whyDatabaseNotMovable = (
   database: DatabaseInfoItem,
-  moves: ReadonlyArray<CustomerMove>,
-  sessions: ReadonlyArray<MigrationSessionItem> = [],
+  movesInput: ListInput<CustomerMove>,
+  sessionsInput: ListInput<MigrationSessionItem> = [],
   staticGrants?: StaticGrantCounts,
 ): string | null => {
   const unavailable = whyDatabaseUnavailable(database.Status);
   if (unavailable) return unavailable;
+  // Nothing may be assumed absent from a list that is still loading or that
+  // failed to load.
+  const moves = toKnownList(movesInput);
+  const sessions = toKnownList(sessionsInput);
+  const unknown =
+    whyListUnknown(moves, "customer moves") ?? whyListUnknown(sessions, "migrations");
+  if (unknown) return unknown;
   // Refused by the service too: the grants live on the source server, and a
   // move does not carry them, so they would still point at the old copy.
   // Until every grant has been read, none may be assumed absent.
@@ -92,13 +100,13 @@ export const whyDatabaseNotMovable = (
   const grants = staticGrants?.counts.get(database.Id) ?? 0;
   if (grants > 0)
     return `${grants} static user privilege(s) are held on it, and moves do not carry static users yet`;
-  const unsettled = moves.find(
+  const unsettled = moves.items.find(
     (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
   );
   if (!unsettled) {
     // The service refuses this too: quiescing does not stop the installer's
     // login, so a move would copy under a stream still writing.
-    const streaming = sessions.some(
+    const streaming = sessions.items.some(
       (s) =>
         s.DatabaseId === database.Id &&
         (s.Status === "redeemed" || s.Status === "streaming"),

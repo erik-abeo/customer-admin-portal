@@ -18,36 +18,47 @@ introducing a parallel one.
 
 `ecs-task-definition.json` is a plain RegisterTaskDefinition input. Nothing in
 CI pushes or deploys (the Docker job builds with `push: false` and has no ECR
-login), so every step is yours:
+login), so every step is yours, in this order:
 
-1. Create the ECR repository once, with immutable tags, as the Terraform does:
+1. **Create the ECR repository** once, with immutable tags, as the Terraform
+   does:
    `aws ecr create-repository --repository-name customer-admin-portal --image-tag-mutability IMMUTABLE`.
-2. Build the image and push it under a **new** tag, a version or commit SHA; an
-   immutable tag such as `latest` can be pushed only once.
-3. Replace the `<ANGLE_BRACKETS>` values for your account, region and that tag,
-   then register the task definition:
+2. **Build and push the image.** Choose the build args first (see "Build-time
+   configuration" below): they are compiled into the bundle and cannot change
+   after the build. Log in to ECR, then build and push under a **new** tag, a
+   version or commit SHA; an immutable tag such as `latest` can be pushed only
+   once:
 
-```bash
-aws ecs register-task-definition --cli-input-json file://deploy/ecs-task-definition.json
-```
+   ```bash
+   aws ecr get-login-password --region <REGION> | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
+   docker build --build-arg VITE_FEATURE_MIGRATIONS=true -t <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/customer-admin-portal:<TAG> .
+   docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/customer-admin-portal:<TAG>
+   ```
 
-It has no task role: nginx serving static files makes no AWS calls. The
-execution role only pulls the image and writes logs.
+3. **Create the log group.** The task logs to `/ecs/customer-admin-portal`
+   through `awslogs`, and it does not create the group itself: that needs
+   `logs:CreateLogGroup`, which the standard `ecsTaskExecutionRole` lacks, so
+   the task would fail to start without it. (The Terraform in `terraform/`
+   creates this group, with 30 days' retention.)
 
-Create or update a service that uses it behind an ALB target group on port 8080. The container is rootless (uid 101) and listens on 8080, so there is no
-port mapping to 80 or 443.
+   ```bash
+   aws logs create-log-group --log-group-name /ecs/customer-admin-portal
+   aws logs put-retention-policy --log-group-name /ecs/customer-admin-portal --retention-in-days 30
+   ```
 
-**Create the log group first.** The task logs to `/ecs/customer-admin-portal`
-through `awslogs`, and it does not create the group itself: that needs
-`logs:CreateLogGroup`, which the standard `ecsTaskExecutionRole` lacks, so the
-task would fail to start. Create it once:
+4. **Register the task definition.** Replace the `<ANGLE_BRACKETS>` values for
+   your account, region and that tag, then:
 
-```bash
-aws logs create-log-group --log-group-name /ecs/customer-admin-portal
-aws logs put-retention-policy --log-group-name /ecs/customer-admin-portal --retention-in-days 30
-```
+   ```bash
+   aws ecs register-task-definition --cli-input-json file://deploy/ecs-task-definition.json
+   ```
 
-The Terraform in `terraform/` already creates this group (30 days' retention).
+   It has no task role: nginx serving static files makes no AWS calls. The
+   execution role only pulls the image and writes logs.
+
+5. **Create or update the service** that uses it, behind an ALB target group on
+   port 8080. The container is rootless (uid 101) and listens on 8080, so there
+   is no port mapping to 80 or 443.
 
 There are no environment variables or secrets to set on the task beyond `TZ`:
 the SPA has no runtime configuration, and every `VITE_*` value is baked in at

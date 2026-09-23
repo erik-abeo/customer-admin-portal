@@ -53,6 +53,7 @@ import {
   useUpdateStaticUser,
 } from "@/features/staticUsers/queries";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { fromQuery } from "@/lib/knownList";
 import { createLatestRequest } from "@/lib/latestRequest";
 import { useListTable } from "@/lib/listTable";
 import { notifyError, notifySuccess } from "@/lib/notify";
@@ -130,6 +131,9 @@ export function StaticUsersPage() {
   // A database with an unsettled move cannot be granted. Moves exist only with
   // the remote-database pages on, so they are read only then.
   const moves = useCustomerMoves({ enabled: features.migrations });
+  // With the feature off the query never runs, so it is an empty list, not
+  // one still loading; otherwise it carries its loading and error state.
+  const knownMoves = features.migrations ? fromQuery(moves) : [];
   const create = useCreateStaticUser();
   const update = useUpdateStaticUser();
   const remove = useDeleteStaticUser();
@@ -432,7 +436,7 @@ export function StaticUsersPage() {
         <StaticUserForm
           servers={servers.data ?? []}
           databases={databases.data ?? []}
-          moves={moves.data ?? []}
+          moves={knownMoves}
           submitLabel="Create user"
           onCancel={createCtl.close}
           submitting={create.isPending}
@@ -493,7 +497,7 @@ export function StaticUsersPage() {
           <StaticUserForm
             servers={servers.data ?? []}
             databases={databases.data ?? []}
-            moves={moves.data ?? []}
+            moves={knownMoves}
             initial={editTarget}
             initialServers={editInitialServers ?? []}
             submitLabel="Save changes"

@@ -50,6 +50,7 @@ import {
   useDropCustomerMoveSource,
   useRollBackCustomerMove,
 } from "@/features/moves/queries";
+import { fromQuery } from "@/lib/knownList";
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notify";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -382,8 +383,8 @@ export function MovesPage() {
   const selectedRefusal = selectedDatabase
     ? whyDatabaseNotMovable(
         selectedDatabase,
-        moves.data ?? [],
-        sessions.data ?? [],
+        fromQuery(moves),
+        fromQuery(sessions),
         staticGrants,
       )
     : null;
@@ -464,8 +465,8 @@ export function MovesPage() {
               // mid-move or suspended is visibly so. The service refuses these too.
               const unavailable = whyDatabaseNotMovable(
                 d,
-                moves.data ?? [],
-                sessions.data ?? [],
+                fromQuery(moves),
+                fromQuery(sessions),
                 staticGrants,
               );
               return {

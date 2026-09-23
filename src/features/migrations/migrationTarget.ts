@@ -7,6 +7,7 @@ import type {
 } from "@/api/types";
 import { whyDatabaseUnavailable } from "@/features/databases/status";
 import { isUnsettledMove } from "@/features/moves/queries";
+import { type ListInput, toKnownList, whyListUnknown } from "@/lib/knownList";
 import { whyServerNotTakingCustomers } from "@/features/databaseServers/status";
 
 /**
@@ -91,17 +92,23 @@ export const whyDatabaseNotSelectable = (
   database: DatabaseInfoItem,
   crystalPmId: number | string,
   context: {
-    sessions?: ReadonlyArray<MigrationSessionItem>;
-    moves?: ReadonlyArray<CustomerMove>;
+    sessions?: ListInput<MigrationSessionItem>;
+    moves?: ListInput<CustomerMove>;
     now?: number;
   } = {},
 ): string | null => {
   const unavailable = whyDatabaseUnavailable(database.Status);
   if (unavailable) return unavailable;
+  const sessions = toKnownList(context.sessions);
+  const moves = toKnownList(context.moves);
+  const unknown =
+    whyListUnknown(sessions, "migration keys") ??
+    whyListUnknown(moves, "customer moves");
+  if (unknown) return unknown;
   // Both refused by the service too. A move is planned before the database
   // is marked moving, so status alone misses a planned one.
   const now = context.now ?? Date.now();
-  const liveKey = (context.sessions ?? []).some(
+  const liveKey = sessions.items.some(
     (s) =>
       s.DatabaseId === database.Id &&
       (s.Status === "redeemed" ||
@@ -112,7 +119,7 @@ export const whyDatabaseNotSelectable = (
   // Unsettled, as the service counts it: in progress, cut over and still able
   // to roll back, or settled with its source drop unfinished. Rows streamed in
   // before a rollback would land on the target and be left behind.
-  const unsettled = (context.moves ?? []).some(
+  const unsettled = moves.items.some(
     (m) => m.DatabaseId === database.Id && isUnsettledMove(m),
   );
   if (unsettled)

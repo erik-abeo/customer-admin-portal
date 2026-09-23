@@ -274,3 +274,17 @@ describe("whyDatabaseNotSelectable with sessions and moves", () => {
     expect(whyDatabaseNotSelectable(mine, 1042, { moves: done })).toBeNull();
   });
 });
+
+describe("whyDatabaseNotSelectable while its lists load or fail", () => {
+  const mine = database(10, 1, "easyopti_1042", 1042);
+  it("does not offer a database while keys or moves are unknown", () => {
+    expect(
+      whyDatabaseNotSelectable(mine, 1042, {
+        sessions: { items: [], status: "loading" },
+      }),
+    ).toBe("checking migration keys");
+    expect(
+      whyDatabaseNotSelectable(mine, 1042, { moves: { items: [], status: "error" } }),
+    ).toBe("customer moves could not be read, so it cannot be checked");
+  });
+});

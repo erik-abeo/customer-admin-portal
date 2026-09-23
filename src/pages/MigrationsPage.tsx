@@ -52,6 +52,7 @@ import {
   revokeEndsAStream,
 } from "@/features/migrations/sessionActions";
 import { needsWorkByHand, useCustomerMoves } from "@/features/moves/queries";
+import { fromQuery } from "@/lib/knownList";
 import { notifyError, notifySuccess, notifyWarning } from "@/lib/notify";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -324,8 +325,8 @@ export function MigrationsPage() {
           servers={servers.data ?? []}
           databases={databases.data ?? []}
           serverStatuses={statuses}
-          sessions={sessions.data ?? []}
-          moves={moves.data ?? []}
+          sessions={fromQuery(sessions)}
+          moves={fromQuery(moves)}
           submitting={createSession.isPending}
           onCancel={() => setFormOpen(false)}
           onSubmit={(request, description) => setPending({ request, description })}

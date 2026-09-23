@@ -23,6 +23,8 @@ import {
   emptyPrivileges,
 } from "@/api/types";
 
+import type { ListInput } from "@/lib/knownList";
+
 import { GRANTABLE_PRIVILEGES, whyNotGrantable } from "./privileges";
 
 interface PrivilegesEditorProps {
@@ -37,7 +39,7 @@ interface PrivilegesEditorProps {
    */
   lockServers?: boolean;
   /** Customer moves, so a database with an unsettled move is not offered. */
-  moves?: CustomerMove[];
+  moves?: ListInput<CustomerMove>;
 }
 
 // No GRANT column: the service never grants WITH GRANT OPTION.

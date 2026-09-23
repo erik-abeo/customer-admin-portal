@@ -10,6 +10,8 @@ import type { Page, Route } from "@playwright/test";
  * ASP.NET's default System.Text.Json serializer produces.
  */
 export interface MockApiOptions {
+  /** Serve 30 servers, more than one page of the list. */
+  manyServers?: boolean;
   baseUrl?: string;
   /** When true, list endpoints return [] (used to test empty states). */
   empty?: boolean;
@@ -33,7 +35,17 @@ export async function installApiMocks(
   const base = (opts.baseUrl ?? DEFAULT_BASE).replace(/\/$/, "");
   const empty = opts.empty ?? false;
 
-  const servers = empty ? [] : sampleServers;
+  // More servers than a page holds (the lists default to 25 a page), so the
+  // pagination controls render and can be checked.
+  const servers = empty
+    ? []
+    : opts.manyServers
+      ? Array.from({ length: 30 }, (_, i) => ({
+          ...sampleServers[i % sampleServers.length],
+          Id: 1000 + i,
+          Name: `bulk-server-${String(i + 1).padStart(2, "0")}`,
+        }))
+      : sampleServers;
   const databases = empty ? [] : sampleDatabases;
   const users = empty ? [] : sampleUsers;
   const staticUsers = empty ? [] : sampleStaticUsers;

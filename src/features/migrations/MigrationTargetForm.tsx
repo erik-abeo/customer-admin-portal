@@ -38,6 +38,7 @@ import {
   whyDatabaseNotSelectable,
   whyServerNotSelectable,
 } from "@/features/migrations/migrationTarget";
+import type { ListInput } from "@/lib/knownList";
 import { composeValidators, maxLength, required } from "@/lib/validators";
 
 interface MigrationTargetFormProps {
@@ -46,8 +47,8 @@ interface MigrationTargetFormProps {
   /** Recorded status per server id. A server missing from it is not refused. */
   serverStatuses?: Map<number, string | null>;
   /** Existing sessions and moves, so a database the service would refuse is disabled. */
-  sessions?: MigrationSessionItem[];
-  moves?: CustomerMove[];
+  sessions?: ListInput<MigrationSessionItem>;
+  moves?: ListInput<CustomerMove>;
   submitting?: boolean;
   onCancel: () => void;
   /** Receives the request plus the plain-language destination for the confirm step. */

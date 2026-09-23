@@ -23,6 +23,21 @@ anyone ever removes the `AddJsonOptions` call in `Program.cs`, this document and
 the SPA both become wrong at once and silently. Request binding is
 case-insensitive, so callers sending camelCase bodies still work.
 
+**Times.** Every `DateTime` the service returns is UTC, written as ISO 8601
+with a trailing `Z` and up to seven fractional-second digits (trailing zeros
+dropped), for example `2026-09-22T19:04:11.1234567Z` or `2026-09-22T19:04:11Z`
+(`UtcDateTimeJsonConverter`). A time sent to it without an offset is read as
+UTC; one with an offset is converted to UTC.
+
+**Blank required fields.** DTO strings that are not nullable are implicitly
+`[Required]`, so a missing or blank one is refused by model validation before
+the endpoint runs: a **400** ValidationProblemDetails whose `title` is "One or
+more validation errors occurred." and whose `errors` names each field ("The
+Host field is required."). That covers `Host`, `User` and `Password` on the
+probe, and `Name`, `LocalServerAddress`, `RootUserPassword` and `Certificate`
+on server create. The portal shows the `title`, and its forms require those
+fields themselves before sending.
+
 Authentication: every management endpoint the SPA calls accepts the static
 `api-key` request header (interim mechanism, validated server-side against
 the `api-key` setting in `appsettings.json`). The other endpoints on the same
@@ -78,7 +93,8 @@ The contract for each is the corresponding TypeScript DTO in
 `create-user`, `update-user` and `delete-user` answer with a plain string on
 success ("User created successfully" and so on) and a plain string or a
 SuperTokens error object on a 400, not a `{ Success, Message }` object.
-`update-user` and `delete-user` also answer **404** "User not found in the custom
+`create-user` and `update-user` answer **400** "MaxLoginInstances must be at
+least 1." for a limit below 1. `update-user` and `delete-user` also answer **404** "User not found in the custom
 database." for an unknown user, and all three answer **500** "Internal server
 error" on an unexpected failure. The SPA does not read the success body;
 failures surface through the HTTP status, and the error interceptor shows a
@@ -169,10 +185,11 @@ from the banner, with MariaDB's `5.5.5-` compatibility prefix stripped first.
 
 `IsSupported` requires every privilege and version gate, and an identified
 engine; `TlsInUse` is reported but is not one of them. `CanGrant` is a gate:
-without `GRANT OPTION`
-the service cannot give a migration login access to the schema it provisions,
-so a server whose login lacks it is refused at registration rather than at the
-first redemption. `CanSeeConnections` is a gate too: without `PROCESS` the login
+without `GRANT OPTION` the service cannot give a migration login access to the
+schema it provisions. **Only the portal enforces this at registration**: it
+will not create a server until a probe passes. The service does not probe on
+create or update, so a caller that skips the probe can register such a server,
+and its first redemption then fails. `CanSeeConnections` is a gate too: without `PROCESS` the login
 sees only its own connections in the process list, so revoking a migration,
 ending a CrystalPM session and draining a move would all report success having
 done nothing. Its check is `privileges.process`, and a rejection names it in
@@ -326,7 +343,9 @@ not been settled or rolled back. The
 refusal stays the backstop for a status that changed after the list was loaded.
 
 **Updating a database** (`update-database-info`) skips blank strings, as the
-server update does, so `Description` cannot be cleared through it. A change of
+server update does, so `Description` cannot be cleared through it. An unknown
+`Id` updates no row and answers 200 with `Success: false` ("Failed to update
+database info"), not a 404. A change of
 `DatabaseServerId` or `DatabaseName` is written only when it is no change, or
 when nothing is tied to where the database is now. The check is part of the
 same `UPDATE`, so a move cutting over at that moment cannot slip past it. A
@@ -659,8 +678,9 @@ from there to disable those servers in its pickers, with the reason, for a key
 that provisions and for a move's target.
 
 A missing body, a `DatabaseServerId` below 1 ("A database server must be
-selected.") and a `CrystalPmId` below 1 ("A CrystalPM customer id is required.")
-are 400s, and so is a name to provision that is not a usable identifier ("'name'
+selected."), a `CrystalPmId` below 1 ("A CrystalPM customer id is required.")
+and a `DatabaseId` below 1 ("DatabaseId must be the id of an existing database,
+or left out to provision a new one.") are 400s, and so is a name to provision that is not a usable identifier ("'name'
 is not a usable database name. Use letters, digits and underscores, starting
 with a letter.").
 
@@ -711,7 +731,7 @@ _starting_ with it. The operator does not need to be told any of this.
   "SessionId": 17,
   "MigrationKey": "CPM-7K4D-9QX2-8M3T-4HZW",   // SHOWN ONCE. Never retrievable again.
   "MigrationKeyPrefix": "7K4D",
-  "ExpiresUtc": "2026-09-22T19:04:11Z",
+  "ExpiresUtc": "2026-09-22T19:04:11.4381205Z", // UTC, up to 7 fractional digits
   "TargetSummary": "Customer 1042 into 'easyopti_1042' on server 3.",
 }
 ```
@@ -804,16 +824,22 @@ them, so the history survives. A second discard of the same session answers
 
 **Redemption can answer 409.** A good key whose destination is no longer
 usable is refused with 409 and a `Message` saying what is in the way: a schema of
-that name appeared on the server after minting; the existing database it was
-minted against has since moved, changed owner, stopped being `active` or gained
-an unsettled move ("The database this key was minted for has a customer move
+that name appeared on the server after minting; for a key that provisions, the
+customer or the name is already registered on that server ("This customer
+already has '...' registered on this server." or "A database named '...' is
+already registered on this server."); the existing database it was minted
+against no longer exists ("The database this key was minted for no longer
+exists. Mint a new key."), has since moved, changed owner, stopped being
+`active` or gained an unsettled move ("The database this key was minted for has a customer move
 that is still in progress or can still be rolled back...", with the same
 advice); another session on that database is `redeemed` or `streaming`
 ("Another migration is already streaming into this database (...)"); or, for a
 key that provisions, its server has stopped being `available` since minting
 ("... so it is not taking new customers. Nothing was created; the key can be
-used once the server is available again."). The key stays `pending` and redeems normally once the conflict is
-cleared. A `ClientPublicIpAddress` that is not exactly one IPv4 or IPv6 address
+used once the server is available again."); or a customer move started on the
+database while the key was being redeemed ("A customer move started on this
+database while the key was being redeemed..."). In every case the key stays
+`pending` and redeems normally once the conflict is cleared. A `ClientPublicIpAddress` that is not exactly one IPv4 or IPv6 address
 is a 400 saying so, and an unexpected failure is a 500. Every other refusal is
 401 with one deliberately uninformative message.
 
@@ -852,8 +878,8 @@ as an empty list.
 | 403      | "You don't have access to this"                                                  | message (status 403)          |
 | 404      | "Not found", with retry                                                          | message (status 404)          |
 | 400, 422 | "Validation failed"                                                              | message (status 400 or 422)   |
-| 409      | "This record changed somewhere else"                                             | message (status 409)          |
-| 429      | "Too many requests"                                                              | message (status 429)          |
+| 409      | "This record changed somewhere else", with retry                                 | message (status 409)          |
+| 429      | "Too many requests", with retry                                                  | message (status 429)          |
 | 5xx      | "The server hit a problem", with retry                                           | message (status 5xx)          |
 
 A refusal the service answers as 200 with `Success: false` is not an error to

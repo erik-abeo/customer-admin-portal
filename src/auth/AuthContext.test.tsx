@@ -4,7 +4,10 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getAdminName, getAuthStrategy } from "@/api/httpClient";
+import { features } from "@/config/env";
+
 import { AuthProvider } from "./AuthContext";
+import { getCurrentRole, setCurrentRole } from "./roles";
 import { useAuth } from "./authContextValue";
 
 const STORAGE_KEY = "cap.auth.v1";
@@ -56,6 +59,34 @@ describe("AuthProvider", () => {
 
   afterEach(() => {
     sessionStorage.clear();
+  });
+
+  it("drops the RBAC role at sign-in and sign-out, so it cannot outlive its session", () => {
+    // With RBAC off every caller reads as admin, which would hide a kept role.
+    const rbac = features as { rbac: boolean };
+    const wasOn = rbac.rbac;
+    rbac.rbac = true;
+    try {
+      render(
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>,
+      );
+      act(() => setCurrentRole("admin"));
+      act(() => {
+        screen.getByText("in").click();
+      });
+      expect(getCurrentRole()).toBe("viewer");
+
+      act(() => setCurrentRole("admin"));
+      act(() => {
+        screen.getByText("out").click();
+      });
+      expect(getCurrentRole()).toBe("viewer");
+    } finally {
+      rbac.rbac = wasOn;
+      act(() => setCurrentRole(null));
+    }
   });
 
   it("starts unauthenticated when sessionStorage is empty", () => {
